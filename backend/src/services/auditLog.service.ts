@@ -25,4 +25,9 @@ export const auditLogService = {
   getOrganizationActivity: async (organizationId: string, limit = 50) => {
     return auditLogRepository.findByOrganization(organizationId, limit);
   },
+
+  // SWFS admin/recruiter view: activity across every client.
+  getAllActivity: async (limit = 50) => {
+    return auditLogRepository.findAll(limit);
+  },
 };

@@ -1,41 +1,61 @@
-import { mockJobs } from '../data/mockStore';
+import { DeepPartial } from 'typeorm';
+import { AppDataSource } from '../config/data-source';
+import { Job } from '../entities';
+
+const repo = () => AppDataSource.getRepository(Job);
+
+function toDto(job: Job) {
+  return {
+    _id: job.id,
+    id: job.id,
+    organizationId: job.organization?.id,
+    title: job.title,
+    department: job.department,
+    location: job.location,
+    status: job.status,
+    totalCandidates: job.totalCandidates,
+    openedAt: job.openedAt,
+    syncedAt: job.updatedAt,
+    description: job.description,
+    payRate: job.payRate,
+    billableHours: job.billableHours,
+    workType: job.workType,
+    payrollType: job.payrollType,
+  };
+}
 
 export const jobRepository = {
-  findByOrganization: async (organizationId: string) =>
-    mockJobs.filter((j) => j.organizationId === organizationId),
+  findAll: async () => {
+    const jobs = await repo().find({ relations: ['organization'], order: { createdAt: 'DESC' } });
+    return jobs.map(toDto);
+  },
 
-  findById: async (id: string) =>
-    mockJobs.find((j) => j._id === id || j.id === id) || null,
+  findByOrganization: async (organizationId: string) => {
+    const jobs = await repo().find({
+      where: { organization: { id: organizationId } },
+      relations: ['organization'],
+      order: { createdAt: 'DESC' },
+    });
+    return jobs.map(toDto);
+  },
 
-  findByRecruitCrmId: async (recruitCrmId: string, organizationId: string) =>
-    mockJobs.find((j) => j.recruitCrmId === recruitCrmId && j.organizationId === organizationId) || null,
-
-  upsert: async (recruitCrmId: string, organizationId: string, data: any) => {
-    const existing = mockJobs.find(
-      (j) => j.recruitCrmId === recruitCrmId && j.organizationId === organizationId
-    );
-    if (existing) return Object.assign(existing, data);
-    const job = { ...data, _id: recruitCrmId, id: recruitCrmId };
-    mockJobs.push(job as any);
-    return job;
+  findById: async (id: string) => {
+    const job = await repo().findOne({ where: { id }, relations: ['organization'] });
+    return job ? toDto(job) : null;
   },
 
   create: async (organizationId: string, data: any) => {
-    const id = `job_${Date.now()}`;
-    const job = {
-      _id: id,
-      id,
-      recruitCrmId: id,
-      organizationId,
-      totalCandidates: 0,
-      status: 'OPEN',
-      syncedAt: new Date(),
-      ...data,
-    };
-    mockJobs.push(job as any);
-    return job;
+    const { rawData, ...rest } = data;
+    const job = await repo().save(
+      repo().create({ ...rest, organization: { id: organizationId } } as DeepPartial<Job>)
+    );
+    return jobRepository.findById(job.id);
   },
 
   countByOrganization: async (organizationId: string) =>
-    mockJobs.filter((j) => j.organizationId === organizationId && j.status === 'OPEN').length,
+    repo().count({ where: { organization: { id: organizationId }, status: 'OPEN' } }),
+
+  incrementCandidateCount: async (id: string, delta = 1) => {
+    await repo().increment({ id }, 'totalCandidates', delta);
+  },
 };

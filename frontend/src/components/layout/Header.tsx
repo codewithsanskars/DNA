@@ -1,66 +1,68 @@
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { RoleBadge } from '../shared/Badge';
+import Avatar from '../shared/Avatar';
+import IconButton from '../shared/IconButton';
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  onMenuClick: () => void;
+  /** Path to return to. When set, a back button appears before the title. */
+  backTo?: string;
+  backLabel?: string;
 }
 
-export default function Header({ title, subtitle }: HeaderProps) {
+export default function Header({ title, subtitle, onMenuClick, backTo, backLabel }: HeaderProps) {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const location = useLocation();
-  const showBack = location.pathname !== '/dashboard';
 
   return (
-    <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-[#222] dark:bg-[#0a0a0a]">
-      <div className="flex items-center gap-3">
-        {showBack && (
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            aria-label="Go back"
-            className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-500 transition-colors hover:border-gray-300 hover:text-gray-900 dark:border-[#222] dark:text-gray-400 dark:hover:border-[#333] dark:hover:text-white"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            Back
-          </button>
+    <header className="z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        {/* Mobile: open the navigation drawer */}
+        <IconButton
+          icon="menu"
+          iconSize={18}
+          label="Open navigation"
+          onClick={onMenuClick}
+          className="lg:hidden"
+        />
+
+        {backTo && (
+          <IconButton
+            icon="arrow-left"
+            iconSize={16}
+            label={backLabel || 'Back'}
+            onClick={() => navigate(backTo)}
+            className="shrink-0"
+          />
         )}
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>
-          {subtitle && <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>}
+
+        <div className="min-w-0">
+          <h1 className="truncate text-[15px] font-semibold leading-tight text-foreground">{title}</h1>
+          {subtitle && (
+            <p className="truncate text-xs leading-tight text-muted-foreground">{subtitle}</p>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
+
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <IconButton
+          icon={theme === 'dark' ? 'sun' : 'moon'}
+          iconSize={15}
+          label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           onClick={toggleTheme}
-          aria-label="Toggle dark mode"
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-gray-300 hover:text-gray-900 dark:border-[#222] dark:text-gray-400 dark:hover:border-[#333] dark:hover:text-white"
-        >
-          {theme === 'dark' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-          )}
-        </button>
+        />
+
         {user && (
-          <div className="flex items-center gap-3">
-            <RoleBadge role={user.role} />
-            <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
-              {(user.name || user.email).charAt(0).toUpperCase()}
+          <div className="flex items-center gap-2.5">
+            <div className="hidden sm:block">
+              <RoleBadge role={user.role} />
             </div>
+            <Avatar name={user.name || user.email} title={user.name} />
           </div>
         )}
       </div>

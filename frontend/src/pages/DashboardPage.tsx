@@ -1,141 +1,233 @@
+import { ReactNode, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
 import { StatCard } from '../components/shared/Card';
-import LoadingSpinner from '../components/shared/LoadingSpinner';
+import Button from '../components/shared/Button';
+import DragWidget from '../components/shared/DragWidget';
+import { CenteredSpinner } from '../components/shared/LoadingSpinner';
+import { ErrorState, EmptyState } from '../components/shared/States';
+import Icon from '../components/shared/Icon';
 import { dashboardApi } from '../api/dashboard.api';
-import { useAuth } from '../hooks/useAuth';
-import { CandidateStage } from '../types';
+import { queryKeys } from '../api/queryKeys';
+import { useAuth } from '../context/AuthContext';
+import { useReorderable } from '../hooks/useReorderable';
+import { humanize, timeAgo } from '../utils/format';
+import { CandidateStage, DashboardSummary } from '../types';
 
-const STAGE_ORDER: CandidateStage[] = ['APPLIED', 'SCREENING', 'INTERVIEW', 'SHORTLISTED', 'OFFER', 'HIRED', 'REJECTED'];
+const STAGE_ORDER: CandidateStage[] = [
+  'APPLIED',
+  'SCREENING',
+  'INTERVIEW',
+  'SHORTLISTED',
+  'OFFER',
+  'HIRED',
+  'REJECTED',
+];
 
-const STAGE_COLORS: Record<CandidateStage, string> = {
-  APPLIED: 'bg-gray-700',
-  SCREENING: 'bg-yellow-700',
-  INTERVIEW: 'bg-blue-700',
-  SHORTLISTED: 'bg-purple-700',
-  OFFER: 'bg-orange-700',
-  HIRED: 'bg-green-700',
-  REJECTED: 'bg-red-800',
+type StatKey = 'openJobs' | 'totalCandidates' | 'shortlisted' | 'inInterview' | 'selected';
+
+const STAT_DEFS: Record<StatKey, { label: string; emphasis?: boolean }> = {
+  openJobs: { label: 'Open Roles' },
+  totalCandidates: { label: 'Candidates' },
+  shortlisted: { label: 'Shortlisted' },
+  inInterview: { label: 'In Interview' },
+  selected: { label: 'Selected', emphasis: true },
 };
+const DEFAULT_STAT_ORDER: StatKey[] = ['openJobs', 'totalCandidates', 'shortlisted', 'inInterview', 'selected'];
 
-function formatAction(action: string) {
-  return action.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
-}
-
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+type SectionKey = 'pipeline' | 'activity';
+const SECTION_LABELS: Record<SectionKey, string> = {
+  pipeline: 'Candidate Pipeline',
+  activity: 'Recent Activity',
+};
+const DEFAULT_SECTION_ORDER: SectionKey[] = ['pipeline', 'activity'];
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['dashboard'],
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: queryKeys.dashboard,
     queryFn: dashboardApi.getSummary,
   });
 
-  if (isLoading) {
-    return (
-      <AppLayout title="Dashboard">
-        <div className="flex h-64 items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
-      </AppLayout>
-    );
-  }
+  const stats = useReorderable<StatKey>('swfs_dashboard_stats_order', DEFAULT_STAT_ORDER);
+  const sections = useReorderable<SectionKey>('swfs_dashboard_sections_order', DEFAULT_SECTION_ORDER);
+  const [editMode, setEditMode] = useState(false);
 
-  if (error || !data) {
+  const isCustomLayout =
+    stats.order.join() !== DEFAULT_STAT_ORDER.join() || sections.order.join() !== DEFAULT_SECTION_ORDER.join();
+
+  const resetLayout = () => {
+    stats.reset();
+    sections.reset();
+  };
+
+  const firstName = user?.name?.split(' ')[0];
+
+  const renderSection = (key: SectionKey, data: DashboardSummary): ReactNode => {
+    if (key === 'pipeline') {
+      const max = Math.max(1, ...Object.values(data.pipelineSummary));
+      return (
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h2 className="text-[13px] font-semibold text-foreground">Candidate Pipeline</h2>
+            <button
+              onClick={() => navigate('/jobs')}
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline"
+            >
+              View roles <Icon name="arrow-right" size={13} />
+            </button>
+          </div>
+          <div className="space-y-1 p-2.5">
+            {STAGE_ORDER.map((stage) => {
+              const count = data.pipelineSummary[stage] || 0;
+              const pct = (count / max) * 100;
+              return (
+                <button
+                  key={stage}
+                  type="button"
+                  onClick={() => navigate('/candidates')}
+                  title={`${count} candidate${count === 1 ? '' : 's'} in ${humanize(stage)}`}
+                  className="group flex w-full items-center gap-4 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
+                >
+                  <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+                    {humanize(stage)}
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted transition-colors group-hover:bg-border">
+                    <div
+                      className="h-full rounded-full bg-muted-foreground transition-all duration-500 group-hover:bg-brand"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <AppLayout title="Dashboard">
-        <p className="text-red-400">Failed to load dashboard data.</p>
-      </AppLayout>
+      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-[13px] font-semibold text-foreground">Recent Activity</h2>
+          <button
+            onClick={() => navigate('/activity')}
+            className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline"
+          >
+            Full log <Icon name="arrow-right" size={13} />
+          </button>
+        </div>
+        {data.recentActivity.length === 0 ? (
+          <EmptyState
+            icon="activity"
+            title="No activity yet"
+            description="Actions across the portal will show up here."
+            className="py-12"
+          />
+        ) : (
+          <ul className="flex-1 divide-y divide-border">
+            {data.recentActivity.map((log) => (
+              <li key={log._id} className="flex gap-3 px-4 py-3">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+                <div className="min-w-0">
+                  <p className="text-[13px] text-foreground">{humanize(log.action)}</p>
+                  <p className="mt-0.5 truncate text-2xs text-subtle-foreground">
+                    {log.userEmail} · {timeAgo(log.createdAt)}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     );
-  }
+  };
 
   return (
     <AppLayout
       title="Dashboard"
-      subtitle={`Welcome back, ${user?.name?.split(' ')[0]}`}
+      subtitle={firstName ? `Welcome back, ${firstName}` : undefined}
+      actions={
+        <div className="ml-auto flex items-center gap-2">
+          {editMode ? (
+            <>
+              {isCustomLayout && (
+                <Button variant="ghost" size="sm" onClick={resetLayout}>
+                  Reset layout
+                </Button>
+              )}
+              <Button variant="primary" size="sm" icon="check" onClick={() => setEditMode(false)}>
+                Save
+              </Button>
+            </>
+          ) : (
+            <Button variant="secondary" size="sm" icon="grip" onClick={() => setEditMode(true)}>
+              Edit layout
+            </Button>
+          )}
+        </div>
+      }
     >
-      {/* Stats */}
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <StatCard label="Open Roles" value={data.openJobs} />
-        <StatCard label="Total Candidates" value={data.totalCandidates} />
-        <StatCard label="Shortlisted" value={data.shortlisted} />
-        <StatCard label="In Interview" value={data.inInterview} />
-        <StatCard label="Selected" value={data.selected} />
-      </div>
+      {isLoading ? (
+        <CenteredSpinner />
+      ) : error || !data ? (
+        <ErrorState onRetry={() => refetch()} />
+      ) : (
+        <div className="space-y-6">
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
+            {stats.order.map((key, i) => {
+              const def = STAT_DEFS[key];
+              return (
+                <DragWidget
+                  key={key}
+                  label={def.label}
+                  orientation="row"
+                  editable={editMode}
+                  handleProps={stats.getHandleProps(key)}
+                  dropZoneProps={stats.getDropZoneProps(key)}
+                  isDragging={stats.isDragging(key)}
+                  isDragOver={stats.isDragOver(key)}
+                  isFirst={i === 0}
+                  isLast={i === stats.order.length - 1}
+                  onMoveBack={() => stats.move(key, -1)}
+                  onMoveForward={() => stats.move(key, 1)}
+                >
+                  <StatCard label={def.label} value={data[key]} emphasis={def.emphasis} />
+                </DragWidget>
+              );
+            })}
+          </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Pipeline */}
-        <div className="lg:col-span-2">
-          <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Candidate Pipeline</h2>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#222] dark:bg-[#111]">
-            <div className="space-y-3">
-              {STAGE_ORDER.map((stage) => {
-                const count = data.pipelineSummary[stage] || 0;
-                const max = Math.max(...Object.values(data.pipelineSummary));
-                const pct = max > 0 ? (count / max) * 100 : 0;
-                return (
-                  <div key={stage} className="flex items-center gap-3">
-                    <span className="w-24 shrink-0 text-xs text-gray-500 dark:text-gray-400">{stage.replace('_', ' ')}</span>
-                    <div className="flex-1 rounded-full bg-gray-100 dark:bg-[#1a1a1a]" style={{ height: '6px' }}>
-                      <div
-                        className={`h-full rounded-full ${STAGE_COLORS[stage]} transition-all`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="w-6 text-right text-xs font-medium text-gray-900 dark:text-white">{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <button
-              onClick={() => navigate('/jobs')}
-              className="mt-4 text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-            >
-              View all roles →
-            </button>
+          <div className="grid gap-6 lg:grid-cols-3">
+            {sections.order.map((key, i) => (
+              <DragWidget
+                key={key}
+                label={SECTION_LABELS[key]}
+                orientation="row"
+                editable={editMode}
+                className={key === 'pipeline' ? 'lg:col-span-2' : ''}
+                handleProps={sections.getHandleProps(key)}
+                dropZoneProps={sections.getDropZoneProps(key)}
+                isDragging={sections.isDragging(key)}
+                isDragOver={sections.isDragOver(key)}
+                isFirst={i === 0}
+                isLast={i === sections.order.length - 1}
+                onMoveBack={() => sections.move(key, -1)}
+                onMoveForward={() => sections.move(key, 1)}
+              >
+                {renderSection(key, data)}
+              </DragWidget>
+            ))}
           </div>
         </div>
-
-        {/* Recent activity */}
-        <div>
-          <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#222] dark:bg-[#111]">
-            {data.recentActivity.length === 0 ? (
-              <p className="text-xs text-gray-400 dark:text-gray-500">No activity yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {data.recentActivity.map((log) => (
-                  <div key={log._id} className="flex gap-3">
-                    <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                    <div>
-                      <p className="text-xs text-gray-900 dark:text-white">{formatAction(log.action)}</p>
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                        {log.userEmail} · {timeAgo(log.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button
-              onClick={() => navigate('/activity')}
-              className="mt-4 text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-            >
-              View full log →
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
     </AppLayout>
   );
 }

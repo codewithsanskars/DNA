@@ -1,4 +1,4 @@
-export type UserRole = 'SWFS_ADMIN' | 'SWFS_RECRUITER' | 'CLIENT_ADMIN' | 'HIRING_MANAGER' | 'VIEWER';
+export type UserRole = 'ADMIN' | 'CLIENT';
 
 export type CandidateStage =
   | 'APPLIED'
@@ -26,7 +26,6 @@ export interface AuthUser {
 
 export interface Job {
   _id: string;
-  recruitCrmId: string;
   organizationId: string;
   title: string;
   department?: string;
@@ -42,11 +41,24 @@ export interface Job {
   payrollType?: PayrollType;
 }
 
+export interface JobLink {
+  jobId: string;
+  jobTitle: string;
+  stage: CandidateStage;
+}
+
+export interface CandidateFeedback {
+  id: string;
+  author: string;
+  authorRole?: string;
+  comment: string;
+  rating?: number;
+  createdAt: string;
+}
+
 export interface Candidate {
   _id: string;
-  recruitCrmId: string;
   organizationId: string;
-  jobId: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -54,12 +66,16 @@ export interface Candidate {
   currentTitle?: string;
   currentCompany?: string;
   location?: string;
-  stage: CandidateStage;
+  jobLinks: JobLink[];
   skills: string[];
   resumeUrl?: string;
+  resumeFileName?: string;
   linkedinUrl?: string;
+  website?: string;
   notes?: string;
   clientRating?: number;
+  feedback?: CandidateFeedback[];
+  source?: 'PORTAL' | 'LINKEDIN';
   syncedAt: string;
 }
 
@@ -86,26 +102,61 @@ export interface AuditLog {
   createdAt: string;
 }
 
+export interface OrganizationContact {
+  name: string;
+  title: string;
+  email: string;
+}
+
+export interface OrganizationSocialLinks {
+  linkedin?: string;
+  twitter?: string;
+  facebook?: string;
+  instagram?: string;
+  [platform: string]: string | undefined;
+}
+
 export interface Organization {
   _id: string;
   name: string;
   slug: string;
   industry?: string;
   website?: string;
-  attio?: {
-    email?: string;
-    socialLinks?: {
-      linkedin?: string;
-      twitter?: string;
-      facebook?: string;
-    };
-    employeeCount?: number;
-    founded?: string;
-    hq?: string;
-    description?: string;
-    contacts?: { name: string; title: string; email: string }[];
-    recentActivity?: { type: string; content: string; date: string }[];
-  };
+  logoUrl?: string;
+  email?: string;
+  description?: string;
+  hq?: string;
+  employeeCount?: number;
+  founded?: string;
+  socialLinks?: OrganizationSocialLinks;
+  contacts?: OrganizationContact[];
+}
+
+/** Preview returned by scraping a company's page — nothing is saved until the form is submitted. */
+export interface ScrapedOrganization {
+  name?: string;
+  description?: string;
+  website?: string;
+  logoUrl?: string;
+  email?: string;
+  hq?: string;
+  employeeCount?: number;
+  founded?: string;
+  socialLinks?: OrganizationSocialLinks;
+  sourceUrl: string;
+}
+
+export interface CreateOrganizationInput {
+  name: string;
+  industry?: string;
+  website?: string;
+  logoUrl?: string;
+  email?: string;
+  description?: string;
+  hq?: string;
+  employeeCount?: number;
+  founded?: string;
+  socialLinks?: OrganizationSocialLinks;
 }
 
 export interface ApiResponse<T> {

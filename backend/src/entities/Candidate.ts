@@ -1,0 +1,88 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+  ManyToOne,
+  OneToMany,
+} from 'typeorm';
+import { CandidateSource } from '../types';
+import { CANDIDATE_SOURCES } from './enums';
+import { Organization } from './Organization';
+import { Application } from './Application';
+import { CandidateFeedback } from './CandidateFeedback';
+
+/** A person in the pipeline. Their per-role stage lives on Application. */
+@Entity('candidates')
+export class Candidate {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Index()
+  @ManyToOne(() => Organization, (organization) => organization.candidates, { onDelete: 'CASCADE' })
+  organization!: Organization;
+
+  @Column()
+  firstName!: string;
+
+  @Column()
+  lastName!: string;
+
+  @Index()
+  @Column({ nullable: true })
+  email?: string;
+
+  @Column({ nullable: true })
+  phone?: string;
+
+  @Column({ nullable: true })
+  currentTitle?: string;
+
+  @Column({ nullable: true })
+  currentCompany?: string;
+
+  @Column({ nullable: true })
+  location?: string;
+
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  skills!: string[];
+
+  // Stores the on-disk filename under uploads/resumes/ (see upload.middleware.ts),
+  // not a public URL — resumes are only ever served through the authenticated
+  // /candidates/:id/resume route.
+  @Column({ nullable: true })
+  resumeUrl?: string;
+
+  // Original filename the resume/CV was uploaded with, for display and download.
+  @Column({ nullable: true })
+  resumeFileName?: string;
+
+  @Column({ nullable: true })
+  linkedinUrl?: string;
+
+  @Column({ nullable: true })
+  website?: string;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
+
+  @Column({ type: 'int', nullable: true })
+  clientRating?: number;
+
+  @Column({ type: 'enum', enum: CANDIDATE_SOURCES, default: 'PORTAL' })
+  source!: CandidateSource;
+
+  @OneToMany(() => Application, (application) => application.candidate)
+  applications!: Application[];
+
+  @OneToMany(() => CandidateFeedback, (feedback) => feedback.candidate, { cascade: true })
+  feedback!: CandidateFeedback[];
+
+  @CreateDateColumn({ type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt!: Date;
+}

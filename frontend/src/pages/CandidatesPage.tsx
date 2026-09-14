@@ -1,54 +1,79 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
-import { StageBadge } from '../components/shared/Badge';
-import LoadingSpinner from '../components/shared/LoadingSpinner';
+import Badge, { StageBadge } from '../components/shared/Badge';
+import Button from '../components/shared/Button';
+import Avatar from '../components/shared/Avatar';
+import Icon from '../components/shared/Icon';
 import Modal from '../components/shared/Modal';
-import { TableShell, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
-import { jobApi } from '../api/job.api';
+import { Field, Input, Select } from '../components/shared/Field';
+import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
+import { TableSkeleton } from '../components/shared/States';
 import { candidateApi } from '../api/candidate.api';
-import { Candidate, CandidateStage } from '../types';
+import { queryKeys } from '../api/queryKeys';
+import { useJobs } from '../hooks/useJobs';
+import { useCandidates } from '../hooks/useCandidates';
+import { useOrganizations } from '../hooks/useOrganizations';
+import { useAuth } from '../context/AuthContext';
+import { isAdminRole } from '../utils/roles';
+import { useToast } from '../components/shared/Toast';
 
-const STAGES: (CandidateStage | 'ALL')[] = ['ALL', 'APPLIED', 'SCREENING', 'INTERVIEW', 'SHORTLISTED', 'OFFER', 'HIRED', 'REJECTED'];
+const ROLE_FILTER_UNLINKED = '__UNLINKED__';
 
 export default function CandidatesPage() {
   const navigate = useNavigate();
+  const { id: jobIdParam } = useParams<{ id?: string }>();
   const queryClient = useQueryClient();
-  const [selectedStage, setSelectedStage] = useState<CandidateStage | 'ALL'>('ALL');
-  const [selectedJobId, setSelectedJobId] = useState<string>('');
+  const { user } = useAuth();
+  const toast = useToast();
+  const isAdmin = isAdminRole(user?.role);
+  const [roleFilter, setRoleFilter] = useState<string>(jobIdParam || '');
   const [showForm, setShowForm] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [currentTitle, setCurrentTitle] = useState('');
+  const [jobId, setJobId] = useState(jobIdParam || '');
+  const [clientId, setClientId] = useState('');
 
-  const { data: jobs, isLoading: jobsLoading } = useQuery({ queryKey: ['jobs'], queryFn: jobApi.getJobs });
+  const { data: jobs, isLoading: jobsLoading } = useJobs();
+  const { data: candidates, isLoading: candidatesLoading } = useCandidates();
+  const { organizations: clients, clientName } = useOrganizations({ enabled: isAdmin });
 
-  const { data: candidates, isLoading: candidatesLoading } = useQuery({
-    queryKey: ['pipeline', selectedJobId],
-    queryFn: () => jobApi.getJobPipeline(selectedJobId),
-    enabled: !!selectedJobId,
-  });
+  const activeJob = jobIdParam ? jobs?.find((j) => j._id === jobIdParam) : undefined;
+
+  const resetForm = () => {
+    setShowForm(false);
+    setFirstName('');
+    setLastName('');
+    setEmail('');
+    setCurrentTitle('');
+    setJobId(jobIdParam || '');
+    setClientId('');
+  };
 
   const createCandidate = useMutation({
     mutationFn: candidateApi.createCandidate,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pipeline', selectedJobId] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      setShowForm(false);
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setCurrentTitle('');
+    onSuccess: (candidate) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      resetForm();
+      toast.success(
+        'Candidate added',
+        candidate ? `${candidate.firstName} ${candidate.lastName} is now in your list.` : undefined
+      );
     },
+    onError: () => toast.error('Couldn’t add the candidate', 'Please try again.'),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedJobId || !firstName.trim() || !lastName.trim() || !email.trim()) return;
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) return;
+    if (isAdmin && !jobId && !clientId) return;
     createCandidate.mutate({
-      jobId: selectedJobId,
+      jobId: jobId || undefined,
+      organizationId: isAdmin ? clientId || undefined : undefined,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),
@@ -56,185 +81,201 @@ export default function CandidatesPage() {
     });
   };
 
-  const filtered: Candidate[] = (candidates || []).filter(
-    (c) => selectedStage === 'ALL' || c.stage === selectedStage
-  );
+  const loading = jobsLoading || candidatesLoading;
+
+  const filtered = (candidates || []).filter((c) => {
+    if (!roleFilter) return true;
+    if (roleFilter === ROLE_FILTER_UNLINKED) return c.jobLinks.length === 0;
+    return c.jobLinks.some((l) => l.jobId === roleFilter);
+  });
 
   return (
-    <AppLayout title="Candidates" subtitle="View and manage candidates across all roles">
-      {jobsLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
-      ) : (
+    <AppLayout
+      title={activeJob ? activeJob.title : 'Candidates'}
+      subtitle={
+        activeJob
+          ? 'Candidates linked to this role'
+          : 'Every candidate across all roles, linked or not'
+      }
+      backTo={jobIdParam ? '/jobs' : undefined}
+      backLabel="Back to roles"
+      actions={
         <>
-          {/* Job selector */}
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <label className="text-xs text-gray-500 dark:text-gray-400">Role:</label>
-              <select
-                value={selectedJobId}
-                onChange={(e) => setSelectedJobId(e.target.value)}
-                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none dark:border-[#333] dark:bg-[#111] dark:text-white"
-              >
-                <option value="">Select a role...</option>
-                {(jobs || []).map((j) => (
-                  <option key={j._id} value={j._id}>
-                    {j.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              disabled={!selectedJobId}
-              title={selectedJobId ? undefined : 'Select a role first'}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          <div className="flex items-center gap-2">
+            <label htmlFor="role-filter" className="text-[13px] text-muted-foreground">
+              Role
+            </label>
+            <Select
+              id="role-filter"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="w-56"
             >
-              + New Candidate
-            </button>
-          </div>
-
-          {showForm && (
-            <Modal title="New Candidate" onClose={() => setShowForm(false)}>
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">First Name *</label>
-                    <input
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      required
-                      className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-none dark:border-[#333] dark:bg-[#0a0a0a] dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Last Name *</label>
-                    <input
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      required
-                      className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-none dark:border-[#333] dark:bg-[#0a0a0a] dark:text-white"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Email *</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-none dark:border-[#333] dark:bg-[#0a0a0a] dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Current Title</label>
-                  <input
-                    value={currentTitle}
-                    onChange={(e) => setCurrentTitle(e.target.value)}
-                    className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-none dark:border-[#333] dark:bg-[#0a0a0a] dark:text-white"
-                  />
-                </div>
-                {createCandidate.isError && (
-                  <p className="text-xs text-red-400">Failed to add candidate. Please try again.</p>
-                )}
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForm(false)}
-                    className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:text-gray-900 dark:border-[#333] dark:text-gray-300 dark:hover:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={createCandidate.isPending}
-                    className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                  >
-                    {createCandidate.isPending ? 'Adding...' : 'Add Candidate'}
-                  </button>
-                </div>
-              </form>
-            </Modal>
-          )}
-
-          {/* Stage filter */}
-          {selectedJobId && (
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {STAGES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSelectedStage(s)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    selectedStage === s
-                      ? 'bg-brand-600 text-white'
-                      : 'border border-gray-300 text-gray-500 hover:text-gray-900 dark:border-[#333] dark:text-gray-400 dark:hover:text-white'
-                  }`}
-                >
-                  {s}
-                </button>
+              <option value="">All candidates</option>
+              <option value={ROLE_FILTER_UNLINKED}>Not linked to any role</option>
+              {(jobs || []).map((j) => (
+                <option key={j._id} value={j._id}>
+                  {j.title}
+                </option>
               ))}
-            </div>
-          )}
-
-          {/* Candidates */}
-          {candidatesLoading ? (
-            <div className="flex h-32 items-center justify-center">
-              <LoadingSpinner />
-            </div>
-          ) : selectedJobId ? (
-            <TableShell>
-              <thead>
-                <tr>
-                  <Th>Name</Th>
-                  <Th>Title / Company</Th>
-                  <Th>Location</Th>
-                  <Th>Skills</Th>
-                  <Th>Stage</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((c) => (
-                  <Tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)}>
-                    <Td>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-sm font-medium text-gray-900 dark:bg-[#1a1a1a] dark:text-white">
-                          {c.firstName.charAt(0)}
-                        </div>
-                        <span className="font-medium text-gray-900 dark:text-white">
-                          {c.firstName} {c.lastName}
-                        </span>
-                      </div>
-                    </Td>
-                    <Td className="text-gray-500 dark:text-gray-400">
-                      {c.currentTitle} {c.currentCompany && `@ ${c.currentCompany}`}
-                    </Td>
-                    <Td className="text-gray-500 dark:text-gray-400">{c.location || '—'}</Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1">
-                        {c.skills.slice(0, 3).map((s) => (
-                          <span key={s} className="rounded bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-[#1a1a1a] dark:text-gray-400">
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    </Td>
-                    <Td>
-                      <StageBadge stage={c.stage} />
-                    </Td>
-                  </Tr>
-                ))}
-                {filtered.length === 0 && <EmptyRow colSpan={5}>No candidates in this stage.</EmptyRow>}
-              </tbody>
-            </TableShell>
-          ) : (
-            <div className="rounded-lg border border-gray-200 bg-white p-12 text-center dark:border-[#222] dark:bg-[#111]">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Select a role above to view candidates.</p>
-            </div>
-          )}
+            </Select>
+          </div>
+          <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
+            New candidate
+          </Button>
         </>
+      }
+    >
+      {showForm && (
+        <Modal title="New candidate" description="Add a candidate to the portal." onClose={resetForm}>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isAdmin && !jobId && (
+              <Field
+                label="Client"
+                required
+                help="Or link to a role below to assign the candidate's client automatically."
+              >
+                {(id) => (
+                  <Select id={id} value={clientId} onChange={(e) => setClientId(e.target.value)} required>
+                    <option value="">Select a client…</option>
+                    {(clients || []).map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="First name" required>
+                {(id) => (
+                  <Input id={id} value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+                )}
+              </Field>
+              <Field label="Last name" required>
+                {(id) => (
+                  <Input id={id} value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+                )}
+              </Field>
+            </div>
+
+            <Field label="Email" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="name@company.com"
+                />
+              )}
+            </Field>
+
+            <Field label="Current title">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={currentTitle}
+                  onChange={(e) => setCurrentTitle(e.target.value)}
+                  placeholder="e.g. Backend Engineer"
+                />
+              )}
+            </Field>
+
+            <Field label="Link to role" hint="optional">
+              {(id) => (
+                <Select id={id} value={jobId} onChange={(e) => setJobId(e.target.value)}>
+                  <option value="">No role yet</option>
+                  {(jobs || []).map((j) => (
+                    <option key={j._id} value={j._id}>
+                      {j.title}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+
+            {createCandidate.isError && (
+              <p className="text-xs text-brand-text">Failed to add the candidate. Please try again.</p>
+            )}
+
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button type="button" variant="ghost" onClick={resetForm}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" loading={createCandidate.isPending}>
+                {createCandidate.isPending ? 'Adding…' : 'Add candidate'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {loading ? (
+        <TableSkeleton cols={isAdmin ? 5 : 4} />
+      ) : (
+        <TableShell>
+          <Thead>
+            <tr>
+              <Th>Name</Th>
+              {isAdmin && <Th>Client</Th>}
+              <Th>Title / Company</Th>
+              <Th>Location</Th>
+              <Th>Roles</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {filtered.map((c) => (
+              <Tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)}>
+                <Td>
+                  <div className="flex items-center gap-3">
+                    <Avatar name={c.firstName} />
+                    <span className="font-medium text-foreground">
+                      {c.firstName} {c.lastName}
+                    </span>
+                    {c.source === 'LINKEDIN' && (
+                      <Icon name="linkedin" size={13} className="shrink-0 text-subtle-foreground" aria-label="Sourced from LinkedIn" />
+                    )}
+                  </div>
+                </Td>
+                {isAdmin && <Td>{clientName(c.organizationId)}</Td>}
+                <Td>
+                  {c.currentTitle || '—'}
+                  {c.currentCompany && <span className="text-subtle-foreground"> · {c.currentCompany}</span>}
+                </Td>
+                <Td>{c.location || '—'}</Td>
+                <Td>
+                  {c.jobLinks.length === 0 ? (
+                    <span className="text-xs text-subtle-foreground">Not linked</span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {c.jobLinks.slice(0, 2).map((l) => (
+                        <span
+                          key={l.jobId}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground"
+                        >
+                          <span className="max-w-[10rem] truncate text-foreground">{l.jobTitle}</span>
+                          <StageBadge stage={l.stage} />
+                        </span>
+                      ))}
+                      {c.jobLinks.length > 2 && (
+                        <Badge tone="neutral">+{c.jobLinks.length - 2}</Badge>
+                      )}
+                    </div>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+            {filtered.length === 0 && (
+              <EmptyRow colSpan={isAdmin ? 5 : 4}>
+                {roleFilter ? 'No candidates match this filter.' : 'No candidates yet.'}
+              </EmptyRow>
+            )}
+          </tbody>
+        </TableShell>
       )}
     </AppLayout>
   );

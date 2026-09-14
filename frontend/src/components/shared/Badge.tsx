@@ -1,41 +1,77 @@
+import { ReactNode } from 'react';
 import { CandidateStage, JobStatus } from '../../types';
+import { humanize } from '../../utils/format';
 
-const STAGE_STYLES: Record<CandidateStage, string> = {
-  APPLIED: 'bg-gray-800 text-gray-300',
-  SCREENING: 'bg-yellow-900/40 text-yellow-400',
-  INTERVIEW: 'bg-blue-900/40 text-blue-400',
-  SHORTLISTED: 'bg-purple-900/40 text-purple-400',
-  OFFER: 'bg-orange-900/40 text-orange-400',
-  HIRED: 'bg-green-900/40 text-green-400',
-  REJECTED: 'bg-red-900/40 text-red-400',
+export type BadgeTone = 'neutral' | 'brand' | 'success' | 'warning' | 'info' | 'purple' | 'danger';
+
+const TONES: Record<BadgeTone, string> = {
+  neutral:
+    'bg-muted text-muted-foreground ring-1 ring-inset ring-border',
+  brand:
+    'bg-brand-subtle text-brand-text ring-1 ring-inset ring-brand/20',
+  success:
+    'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-400/20',
+  warning:
+    'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-400/20',
+  info:
+    'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-400/20',
+  purple:
+    'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-400 dark:ring-violet-400/20',
+  danger:
+    'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-rose-400/20',
 };
 
-const STATUS_STYLES: Record<JobStatus, string> = {
-  OPEN: 'bg-green-900/40 text-green-400',
-  CLOSED: 'bg-gray-800 text-gray-400',
-  ON_HOLD: 'bg-yellow-900/40 text-yellow-400',
+interface BadgeProps {
+  tone?: BadgeTone;
+  children: ReactNode;
+  className?: string;
+  dot?: boolean;
+}
+
+export default function Badge({ tone = 'neutral', children, className = '', dot }: BadgeProps) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-2xs font-medium ${TONES[tone]} ${className}`}
+    >
+      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+      {children}
+    </span>
+  );
+}
+
+const STAGE_TONES: Record<CandidateStage, BadgeTone> = {
+  APPLIED: 'neutral',
+  SCREENING: 'warning',
+  INTERVIEW: 'info',
+  SHORTLISTED: 'purple',
+  OFFER: 'brand',
+  HIRED: 'success',
+  REJECTED: 'danger',
+};
+
+const STATUS_TONES: Record<JobStatus, BadgeTone> = {
+  OPEN: 'success',
+  CLOSED: 'neutral',
+  ON_HOLD: 'warning',
 };
 
 export function StageBadge({ stage }: { stage: CandidateStage }) {
   return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STAGE_STYLES[stage]}`}>
-      {stage.replace('_', ' ')}
-    </span>
+    <Badge tone={STAGE_TONES[stage]} dot>
+      {humanize(stage)}
+    </Badge>
   );
 }
 
 export function StatusBadge({ status }: { status: JobStatus }) {
   return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status]}`}>
-      {status.replace('_', ' ')}
-    </span>
+    <Badge tone={STATUS_TONES[status]} dot>
+      {humanize(status)}
+    </Badge>
   );
 }
 
 export function RoleBadge({ role }: { role: string }) {
-  return (
-    <span className="inline-flex items-center rounded bg-blue-900/30 px-2 py-0.5 text-xs font-medium text-blue-400">
-      {role.replace(/_/g, ' ')}
-    </span>
-  );
+  if (!role) return null;
+  return <Badge tone="neutral">{humanize(role)}</Badge>;
 }

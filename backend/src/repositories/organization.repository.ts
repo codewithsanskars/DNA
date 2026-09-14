@@ -1,18 +1,45 @@
-import { mockOrganizations } from '../data/mockStore';
+import { DeepPartial } from 'typeorm';
+import { AppDataSource } from '../config/data-source';
+import { Organization } from '../entities';
+
+const repo = () => AppDataSource.getRepository(Organization);
+
+function toDto(org: Organization) {
+  return {
+    ...org,
+    _id: org.id,
+    contacts: (org.contacts || []).map((c) => ({ name: c.name, title: c.title, email: c.email })),
+  };
+}
 
 export const organizationRepository = {
-  findById: async (id: string) =>
-    mockOrganizations.find((o) => o._id === id || o.id === id) || null,
+  findById: async (id: string) => {
+    const org = await repo().findOne({ where: { id }, relations: ['contacts'] });
+    return org ? toDto(org) : null;
+  },
 
-  findBySlug: async (slug: string) =>
-    mockOrganizations.find((o) => o.slug === slug && o.isActive) || null,
+  findBySlug: async (slug: string) => {
+    const org = await repo().findOne({ where: { slug, isActive: true }, relations: ['contacts'] });
+    return org ? toDto(org) : null;
+  },
 
-  findAll: async () => [...mockOrganizations].sort((a, b) => a.name.localeCompare(b.name)),
+  findAll: async () => {
+    const orgs = await repo().find({ relations: ['contacts'], order: { name: 'ASC' } });
+    return orgs.map(toDto);
+  },
 
-  create: async (data: any) => ({ ...data, _id: data.slug, id: data.slug }),
+  create: async (data: DeepPartial<Organization>) => {
+    const org = await repo().save(repo().create(data));
+    return toDto(org);
+  },
+
+  /** Includes inactive rows too — a slug must be unique regardless of status. */
+  slugTaken: async (slug: string) => {
+    return (await repo().count({ where: { slug } })) > 0;
+  },
 
   update: async (id: string, data: any) => {
-    const org = mockOrganizations.find((o) => o._id === id);
-    return org ? { ...org, ...data } : null;
+    await repo().update(id, data);
+    return organizationRepository.findById(id);
   },
 };

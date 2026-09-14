@@ -1,15 +1,30 @@
+import path from 'path';
+import fs from 'fs';
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { candidateService } from '../services/candidate.service';
 import { auditLogService } from '../services/auditLog.service';
+import { jobService } from '../services/job.service';
+import { organizationRepository } from '../repositories/organization.repository';
+import { isAdminRole } from '../utils/roles';
+import { RESUME_DIR } from '../middleware/upload.middleware';
 
 export const candidateController = {
+  getCandidates: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const data = isAdminRole(req.user!.role)
+        ? await candidateService.getAllCandidates()
+        : await candidateService.getCandidatesForOrganization(req.user!.organizationId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   getCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const candidate = await candidateService.getCandidateById(
-        req.params.id,
-        req.user!.organizationId
-      );
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const candidate = await candidateService.getCandidateById(req.params.id, orgScope);
       if (!candidate) {
         res.status(404).json({ success: false, error: 'Candidate not found' });
         return;
@@ -22,11 +37,14 @@ export const candidateController = {
 
   shortlist: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const updated = await candidateService.shortlistCandidate(
-        req.params.id,
-        req.user!.organizationId
-      );
-      await auditLogService.log(req.user!, 'SHORTLIST', 'candidate', req.params.id, {});
+      const { jobId } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.shortlistCandidate(req.params.id, jobId, orgScope);
+      await auditLogService.log(req.user!, 'SHORTLIST', 'candidate', req.params.id, { jobId });
       res.json({ success: true, data: updated });
     } catch (err) {
       next(err);
@@ -35,11 +53,14 @@ export const candidateController = {
 
   reject: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const updated = await candidateService.rejectCandidate(
-        req.params.id,
-        req.user!.organizationId
-      );
-      await auditLogService.log(req.user!, 'REJECT', 'candidate', req.params.id, {});
+      const { jobId } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.rejectCandidate(req.params.id, jobId, orgScope);
+      await auditLogService.log(req.user!, 'REJECT', 'candidate', req.params.id, { jobId });
       res.json({ success: true, data: updated });
     } catch (err) {
       next(err);
@@ -48,11 +69,13 @@ export const candidateController = {
 
   requestInterview: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const updated = await candidateService.requestInterview(
-        req.params.id,
-        req.user!.organizationId,
-        req.body
-      );
+      const { jobId, ...requestData } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.requestInterview(req.params.id, jobId, orgScope, requestData);
       await auditLogService.log(req.user!, 'REQUEST_INTERVIEW', 'candidate', req.params.id, req.body);
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -63,11 +86,17 @@ export const candidateController = {
   submitFeedback: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { feedback, rating } = req.body;
+      if (!feedback || !String(feedback).trim()) {
+        res.status(400).json({ success: false, error: 'feedback is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
       const result = await candidateService.submitFeedback(
         req.params.id,
-        req.user!.organizationId,
-        feedback,
-        rating
+        orgScope,
+        String(feedback).trim(),
+        rating,
+        { email: req.user!.email, role: req.user!.role }
       );
       await auditLogService.log(req.user!, 'SUBMIT_FEEDBACK', 'candidate', req.params.id, { feedback, rating });
       res.json({ success: true, data: result });
@@ -78,12 +107,31 @@ export const candidateController = {
 
   createCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { jobId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl } = req.body;
-      if (!jobId || !firstName || !lastName || !email) {
-        res.status(400).json({ success: false, error: 'jobId, firstName, lastName, and email are required' });
+      const { jobId, organizationId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, source } = req.body;
+      if (!firstName || !lastName) {
+        res.status(400).json({ success: false, error: 'firstName and lastName are required' });
         return;
       }
-      const candidate = await candidateService.createCandidate(req.user!.organizationId, jobId, {
+      const candidateSource = ['PORTAL', 'LINKEDIN'].includes(source) ? source : 'PORTAL';
+
+      // Clients always create candidates under their own org. Admins may target any
+      // client — either explicitly, or implicitly via the job the candidate is linked to.
+      let targetOrgId = req.user!.organizationId;
+      if (isAdminRole(req.user!.role)) {
+        if (organizationId) {
+          const org = await organizationRepository.findById(organizationId);
+          if (!org) {
+            res.status(400).json({ success: false, error: 'Selected client not found' });
+            return;
+          }
+          targetOrgId = organizationId;
+        } else if (jobId) {
+          const job = await jobService.getJobById(jobId, null);
+          if (job) targetOrgId = job.organizationId;
+        }
+      }
+
+      const candidate = await candidateService.createCandidate(targetOrgId, jobId || undefined, {
         firstName,
         lastName,
         email,
@@ -93,9 +141,82 @@ export const candidateController = {
         location,
         skills,
         linkedinUrl,
+        website,
+        source: candidateSource,
       });
-      await auditLogService.log(req.user!, 'CREATE_CANDIDATE', 'candidate', candidate._id, { jobId, email });
+      await auditLogService.log(req.user!, 'CREATE_CANDIDATE', 'candidate', candidate._id, { jobId, email, source: candidateSource });
       res.status(201).json({ success: true, data: candidate });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  linkJob: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { jobId } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.linkToJob(req.params.id, orgScope, jobId);
+      await auditLogService.log(req.user!, 'LINK_JOB', 'candidate', req.params.id, { jobId });
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  uploadResume: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'A .pdf or .docx resume file is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const { candidate, previous } = await candidateService.setResume(
+        req.params.id,
+        orgScope,
+        req.file.filename,
+        req.file.originalname
+      );
+      if (previous) fs.unlink(path.join(RESUME_DIR, previous.storedName), () => {});
+      await auditLogService.log(req.user!, 'UPLOAD_RESUME', 'candidate', req.params.id, {
+        fileName: req.file.originalname,
+      });
+      res.json({ success: true, data: candidate });
+    } catch (err) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      next(err);
+    }
+  },
+
+  downloadResume: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const file = await candidateService.getResumeFile(req.params.id, orgScope);
+      if (!file) {
+        res.status(404).json({ success: false, error: 'Resume not found' });
+        return;
+      }
+      const filePath = path.join(RESUME_DIR, file.storedName);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ success: false, error: 'Resume file is missing' });
+        return;
+      }
+      res.download(filePath, file.fileName || file.storedName);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deleteResume: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const { candidate, previous } = await candidateService.deleteResume(req.params.id, orgScope);
+      if (previous) fs.unlink(path.join(RESUME_DIR, previous.storedName), () => {});
+      await auditLogService.log(req.user!, 'DELETE_RESUME', 'candidate', req.params.id, {});
+      res.json({ success: true, data: candidate });
     } catch (err) {
       next(err);
     }

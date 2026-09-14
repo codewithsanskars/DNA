@@ -61,6 +61,9 @@ pids/
 *.seed
 *.pid.lock
 
+# Uploaded files (resumes, etc.)
+backend/uploads/
+
 # Temporary files
 *.tmp
 *.temp

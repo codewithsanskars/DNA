@@ -12,5 +12,10 @@ export const authApi = {
     return res.data.data!;
   },
 
+  getOktaStatus: async (): Promise<{ configured: boolean }> => {
+    const res = await api.get<ApiResponse<{ configured: boolean }>>('/auth/okta/status');
+    return res.data.data!;
+  },
+
   getOktaLoginUrl: (): string => '/api/auth/okta/login',
 };

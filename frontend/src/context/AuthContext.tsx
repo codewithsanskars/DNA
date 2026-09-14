@@ -8,6 +8,9 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string) => Promise<void>;
   logout: () => void;
+  /** True for a moment right after a fresh sign-in (not a resumed session) — drives the post-login logo animation. */
+  justSignedIn: boolean;
+  dismissJustSignedIn: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -16,6 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('swfs_token'));
   const [isLoading, setIsLoading] = useState(true);
+  const [justSignedIn, setJustSignedIn] = useState(false);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('swfs_token');
@@ -41,7 +45,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('swfs_token', callbackToken);
       setToken(callbackToken);
       window.history.replaceState({}, '', '/');
-      authApi.me().then(setUser).finally(() => setIsLoading(false));
+      authApi
+        .me()
+        .then((u) => {
+          setUser(u);
+          setJustSignedIn(true);
+        })
+        .finally(() => setIsLoading(false));
     }
   }, []);
 
@@ -50,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('swfs_token', result.token);
     setToken(result.token);
     setUser(result.user);
+    setJustSignedIn(true);
   };
 
   const logout = () => {
@@ -58,8 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const dismissJustSignedIn = () => setJustSignedIn(false);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, token, isLoading, login, logout, justSignedIn, dismissJustSignedIn }}
+    >
       {children}
     </AuthContext.Provider>
   );

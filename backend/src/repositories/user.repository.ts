@@ -1,46 +1,86 @@
-import { mockUsers, mockOrganizationUsers } from '../data/mockStore';
+import { AppDataSource } from '../config/data-source';
+import { User, OrganizationMembership } from '../entities';
 
-let userCounter = mockUsers.length;
+const users = () => AppDataSource.getRepository(User);
+const memberships = () => AppDataSource.getRepository(OrganizationMembership);
+
+function toDto(user: User) {
+  return { ...user, _id: user.id };
+}
 
 export const userRepository = {
-  findById: async (id: string) =>
-    mockUsers.find((u) => u._id === id || u.id === id) || null,
+  findById: async (id: string) => {
+    const user = await users().findOne({ where: { id } });
+    return user ? toDto(user) : null;
+  },
 
-  findByEmail: async (email: string) =>
-    mockUsers.find((u) => u.email === email.toLowerCase() && u.isActive) || null,
+  findByEmail: async (email: string) => {
+    const user = await users().findOne({ where: { email: email.toLowerCase(), isActive: true } });
+    return user ? toDto(user) : null;
+  },
 
-  findByOktaId: async (_oktaId: string) => null,
+  findByOktaId: async (oktaId: string) => {
+    const user = await users().findOne({ where: { oktaId } });
+    return user ? toDto(user) : null;
+  },
 
-  create: async (data: any) => {
-    const user = { ...data, _id: `user_${++userCounter}`, id: `user_${userCounter}`, isActive: true };
-    mockUsers.push(user as any);
-    return user;
+  create: async (data: { email: string; name: string }) => {
+    const user = await users().save(users().create({ email: data.email, name: data.name }));
+    return toDto(user);
   },
 
   update: async (id: string, data: any) => {
-    const user = mockUsers.find((u) => u._id === id);
-    if (user) Object.assign(user, data);
-    return user || null;
+    await users().update(id, data);
+    return userRepository.findById(id);
   },
 
-  findOrganizationsForUser: async (userId: string) =>
-    mockOrganizationUsers.filter((ou) => ou.userId === userId && ou.isActive),
+  // Every active organization/role pair this user belongs to.
+  findOrganizationsForUser: async (userId: string) => {
+    const rows = await memberships().find({
+      where: { user: { id: userId }, isActive: true },
+      relations: ['organization'],
+    });
+    return rows.map((m) => ({
+      organizationId: m.organization.id,
+      userId,
+      role: m.role,
+      isActive: m.isActive,
+    }));
+  },
 
-  findUsersInOrganization: async (organizationId: string) =>
-    mockOrganizationUsers.filter((ou) => ou.organizationId === organizationId && ou.isActive),
+  findUsersInOrganization: async (organizationId: string) => {
+    const rows = await memberships().find({
+      where: { organization: { id: organizationId }, isActive: true },
+      relations: ['user'],
+    });
+    return rows.map((m) => ({
+      organizationId,
+      userId: m.user.id,
+      role: m.role,
+      isActive: m.isActive,
+    }));
+  },
 
-  addToOrganization: async (data: any) => {
-    const existing = mockOrganizationUsers.find(
-      (ou) => ou.organizationId === data.organizationId && ou.userId === data.userId
+  // Upserts the (user, organization) membership — used both by admin flows and
+  // to auto-provision demo/prototype logins.
+  addToOrganization: async (data: { organizationId: string; userId: string; role: string }) => {
+    const existing = await memberships().findOne({
+      where: { organization: { id: data.organizationId }, user: { id: data.userId } },
+    });
+    const saved = await memberships().save(
+      memberships().create({
+        ...(existing ? { id: existing.id } : {}),
+        organization: { id: data.organizationId } as any,
+        user: { id: data.userId } as any,
+        role: data.role as any,
+        isActive: true,
+      })
     );
-    if (existing) return { ...existing, ...data };
-    mockOrganizationUsers.push(data);
-    return data;
+    return { organizationId: data.organizationId, userId: data.userId, role: saved.role, isActive: saved.isActive };
   },
 
   updateLastLogin: async (id: string) => {
-    const user = mockUsers.find((u) => u._id === id);
-    if (user) (user as any).lastLoginAt = new Date();
-    return user || null;
+    await users().update(id, { lastLoginAt: new Date() });
+    return userRepository.findById(id);
   },
 };

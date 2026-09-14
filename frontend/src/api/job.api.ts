@@ -28,6 +28,7 @@ export const jobApi = {
     billableHours?: string;
     workType?: WorkType;
     payrollType?: PayrollType;
+    organizationId?: string;
   }): Promise<Job> => {
     const res = await api.post<ApiResponse<Job>>('/jobs', data);
     return res.data.data!;

@@ -1,39 +1,24 @@
-import { recruitCrmClient } from '../integrations/recruitCrm.client';
 import { jobRepository } from '../repositories/job.repository';
 
 export const jobService = {
+  // SWFS admin/recruiter view: every job across every client.
+  getAllJobs: async () => {
+    return jobRepository.findAll();
+  },
+
   getJobsForOrganization: async (organizationId: string) => {
-    // Try DB cache first
-    const cached = await jobRepository.findByOrganization(organizationId);
-    if (cached.length > 0) return cached;
-
-    // Fetch from Recruit CRM and cache
-    const crmJobs = await recruitCrmClient.getJobs(organizationId);
-    const saved = await Promise.all(
-      crmJobs.map((job) =>
-        jobRepository.upsert(job.id, organizationId, {
-          recruitCrmId: job.id,
-          organizationId,
-          title: job.title,
-          department: job.department,
-          location: job.location,
-          status: job.status,
-          totalCandidates: job.totalCandidates,
-          openedAt: job.openedAt ? new Date(job.openedAt) : undefined,
-          rawData: job,
-        })
-      )
-    );
-    return saved;
+    return jobRepository.findByOrganization(organizationId);
   },
 
-  getJobById: async (jobId: string, organizationId: string) => {
+  // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
+  getJobById: async (jobId: string, organizationId: string | null) => {
     const cached = await jobRepository.findById(jobId);
-    if (cached && cached.organizationId === organizationId) return cached;
-    return null;
+    if (!cached) return null;
+    if (organizationId && cached.organizationId !== organizationId) return null;
+    return cached;
   },
 
-  getPipelineForJob: async (jobId: string, organizationId: string) => {
+  getPipelineForJob: async (jobId: string, organizationId: string | null) => {
     const job = await jobService.getJobById(jobId, organizationId);
     if (!job) return null;
     return job;

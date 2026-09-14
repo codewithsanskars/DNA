@@ -1,70 +1,66 @@
 import { useQuery } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
-import LoadingSpinner from '../components/shared/LoadingSpinner';
-import { activityApi } from '../api/organization.api';
+import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
+import { TableSkeleton } from '../components/shared/States';
+import Icon, { IconName } from '../components/shared/Icon';
+import { activityApi } from '../api/activity.api';
+import { queryKeys } from '../api/queryKeys';
+import { humanize, formatTimestamp } from '../utils/format';
 
-const ACTION_ICONS: Record<string, string> = {
-  SHORTLIST: '⭐',
-  REJECT: '✕',
-  REQUEST_INTERVIEW: '📅',
-  SUBMIT_FEEDBACK: '💬',
+const ACTION_ICONS: Record<string, IconName> = {
+  SHORTLIST: 'star',
+  REJECT: 'close',
+  REQUEST_INTERVIEW: 'calendar',
+  SUBMIT_FEEDBACK: 'message',
 };
-
-function formatAction(action: string) {
-  return action.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
-}
 
 export default function ActivityPage() {
   const { data: logs, isLoading } = useQuery({
-    queryKey: ['activity'],
+    queryKey: queryKeys.activity,
     queryFn: () => activityApi.getActivity(100),
   });
 
   return (
-    <AppLayout title="Activity Log" subtitle="Audit trail of all portal actions">
+    <AppLayout title="Activity Log" subtitle="Audit trail of portal actions">
       {isLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <LoadingSpinner size="lg" />
-        </div>
+        <TableSkeleton cols={4} rows={8} />
       ) : (
-        <div className="rounded-lg border border-gray-200 bg-white dark:border-[#222] dark:bg-[#111]">
-          {!logs || logs.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400">No activity recorded yet.</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-600">
-                Actions like shortlisting or rejecting candidates will appear here.
-              </p>
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-[#222]">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 dark:text-gray-500">Action</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 dark:text-gray-500">User</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 dark:text-gray-500">Entity</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 dark:text-gray-500">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-[#1a1a1a]">
-                {logs.map((log) => (
-                  <tr key={log._id} className="hover:bg-gray-50 dark:hover:bg-[#0f0f0f]">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span>{ACTION_ICONS[log.action] || '●'}</span>
-                        <span className="text-gray-900 dark:text-white">{formatAction(log.action)}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{log.userEmail}</td>
-                    <td className="px-4 py-3 text-gray-400 dark:text-gray-500 font-mono text-xs">{log.entityType} / {log.entityId.slice(-8)}</td>
-                    <td className="px-4 py-3 text-gray-400 dark:text-gray-500 text-xs">
-                      {new Date(log.createdAt).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <TableShell>
+          <Thead>
+            <tr>
+              <Th>Action</Th>
+              <Th>User</Th>
+              <Th>Entity</Th>
+              <Th className="text-right">Time</Th>
+            </tr>
+          </Thead>
+          <tbody>
+            {(logs || []).map((log) => (
+              <Tr key={log._id}>
+                <Td>
+                  <span className="inline-flex items-center gap-2.5 text-foreground">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-muted-foreground ring-1 ring-inset ring-border">
+                      <Icon name={ACTION_ICONS[log.action] || 'activity'} size={13} />
+                    </span>
+                    {humanize(log.action)}
+                  </span>
+                </Td>
+                <Td>{log.userEmail}</Td>
+                <Td className="font-mono text-2xs text-subtle-foreground">
+                  {log.entityType} / {log.entityId.slice(-8)}
+                </Td>
+                <Td className="text-right tabular-nums text-2xs text-subtle-foreground">
+                  {formatTimestamp(log.createdAt)}
+                </Td>
+              </Tr>
+            ))}
+            {(!logs || logs.length === 0) && (
+              <EmptyRow colSpan={4}>
+                No activity recorded yet. Actions like shortlisting or rejecting candidates will appear here.
+              </EmptyRow>
+            )}
+          </tbody>
+        </TableShell>
       )}
     </AppLayout>
   );

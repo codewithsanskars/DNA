@@ -1,12 +1,10 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest, UserRole } from '../types';
 
+// Two groups only: ADMIN (SWFS staff) outranks CLIENT (client-org users).
 const ROLE_HIERARCHY: Record<UserRole, number> = {
-  SWFS_ADMIN: 5,
-  SWFS_RECRUITER: 4,
-  CLIENT_ADMIN: 3,
-  HIRING_MANAGER: 2,
-  VIEWER: 1,
+  ADMIN: 2,
+  CLIENT: 1,
 };
 
 export function requireRole(...roles: UserRole[]) {
@@ -38,7 +36,7 @@ export function requireOrganizationAccess(
     return;
   }
 
-  if (req.user.role === 'SWFS_ADMIN' || req.user.role === 'SWFS_RECRUITER') {
+  if (req.user.role === 'ADMIN') {
     next();
     return;
   }
