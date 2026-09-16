@@ -24,12 +24,14 @@ export default function JobsPage() {
   const toast = useToast();
   const isAdmin = isAdminRole(user?.role);
   const [showForm, setShowForm] = useState(false);
+  const [editingJob, setEditingJob] = useState<Job | null>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [title, setTitle] = useState('');
   const [department, setDepartment] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [payRate, setPayRate] = useState('');
+  const [billRate, setBillRate] = useState('');
   const [billableHours, setBillableHours] = useState('');
   const [workType, setWorkType] = useState<WorkType>('FULL_TIME');
   const [payrollType, setPayrollType] = useState<PayrollType>('THIRD_PARTY');
@@ -40,15 +42,38 @@ export default function JobsPage() {
 
   const resetForm = () => {
     setShowForm(false);
+    setEditingJob(null);
     setTitle('');
     setDepartment('');
     setLocation('');
     setDescription('');
     setPayRate('');
+    setBillRate('');
     setBillableHours('');
     setWorkType('FULL_TIME');
     setPayrollType('THIRD_PARTY');
     setClientId('');
+  };
+
+  const openCreateForm = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const openEditForm = (job: Job) => {
+    setEditingJob(job);
+    setTitle(job.title);
+    setDepartment(job.department || '');
+    setLocation(job.location || '');
+    setDescription(job.description || '');
+    setPayRate(job.payRate != null ? String(job.payRate) : '');
+    setBillRate(job.billRate != null ? String(job.billRate) : '');
+    setBillableHours(job.billableHours || '');
+    setWorkType(job.workType || 'FULL_TIME');
+    setPayrollType(job.payrollType || 'THIRD_PARTY');
+    setClientId(job.organizationId || '');
+    setSelectedJob(null);
+    setShowForm(true);
   };
 
   const createJob = useMutation({
@@ -61,16 +86,46 @@ export default function JobsPage() {
     onError: () => toast.error('Couldn’t create the role', 'Please try again.'),
   });
 
+  const updateJob = useMutation({
+    mutationFn: (data: Parameters<typeof jobApi.updateJob>[1]) => jobApi.updateJob(editingJob!._id, data),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      resetForm();
+      toast.success('Role updated', job?.title ? `“${job.title}” was saved.` : undefined);
+    },
+    onError: () => toast.error('Couldn’t update the role', 'Please try again.'),
+  });
+
+  const isEditing = !!editingJob;
+  const savingJob = isEditing ? updateJob : createJob;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    const parsedPayRate = payRate.trim() ? Number(payRate) : undefined;
+    const parsedBillRate = billRate.trim() ? Number(billRate) : undefined;
+    if (isEditing) {
+      updateJob.mutate({
+        title: title.trim(),
+        department: department.trim() || undefined,
+        location: location.trim() || undefined,
+        description: description.trim() || undefined,
+        payRate: isAdmin ? parsedPayRate : undefined,
+        billRate: parsedBillRate,
+        billableHours: billableHours.trim() || undefined,
+        workType,
+        payrollType,
+      });
+      return;
+    }
     if (isAdmin && !clientId) return;
     createJob.mutate({
       title: title.trim(),
       department: department.trim() || undefined,
       location: location.trim() || undefined,
       description: description.trim() || undefined,
-      payRate: payRate.trim() || undefined,
+      payRate: isAdmin ? parsedPayRate : undefined,
+      billRate: parsedBillRate,
       billableHours: billableHours.trim() || undefined,
       workType,
       payrollType,
@@ -83,13 +138,12 @@ export default function JobsPage() {
   return (
     <AppLayout
       title="Open Roles"
-      subtitle="Active and recent job postings"
       actions={
         <>
           <p className="text-[13px] text-muted-foreground">
             {isLoading ? 'Loading…' : `${jobCount} ${jobCount === 1 ? 'role' : 'roles'}`}
           </p>
-          <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
+          <Button variant="primary" icon="plus" onClick={openCreateForm}>
             New role
           </Button>
         </>
@@ -97,12 +151,14 @@ export default function JobsPage() {
     >
       {showForm && (
         <Modal
-          title="New job opening"
-          description="Post a role to start collecting candidates."
+          title={isEditing ? 'Edit job opening' : 'New job opening'}
+          description={
+            isEditing ? 'Update the details of this role.' : 'Post a role to start collecting candidates.'
+          }
           onClose={resetForm}
         >
           <form onSubmit={handleSubmit} className="space-y-4">
-            {isAdmin && (
+            {isAdmin && !isEditing && (
               <Field label="Client" required>
                 {(id) => (
                   <Select id={id} value={clientId} onChange={(e) => setClientId(e.target.value)} required>
@@ -164,16 +220,37 @@ export default function JobsPage() {
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Pay rate">
+              {isAdmin && (
+                <Field label="Pay rate" hint="$/hr · not shown to the client">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={payRate}
+                      onChange={(e) => setPayRate(e.target.value)}
+                      placeholder="e.g. 70"
+                    />
+                  )}
+                </Field>
+              )}
+              <Field label="Bill rate" hint="$/hr">
                 {(id) => (
                   <Input
                     id={id}
-                    value={payRate}
-                    onChange={(e) => setPayRate(e.target.value)}
-                    placeholder="e.g. $60 – $75/hr"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={billRate}
+                    onChange={(e) => setBillRate(e.target.value)}
+                    placeholder="e.g. 90"
                   />
                 )}
               </Field>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Billable hours">
                 {(id) => (
                   <Input
@@ -211,23 +288,33 @@ export default function JobsPage() {
               </Field>
             </div>
 
-            {createJob.isError && (
-              <p className="text-xs text-brand-text">Failed to create the role. Please try again.</p>
+            {savingJob.isError && (
+              <p className="text-xs text-brand-text">
+                {isEditing ? 'Failed to update the role. Please try again.' : 'Failed to create the role. Please try again.'}
+              </p>
             )}
 
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button type="button" variant="ghost" onClick={resetForm}>
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" loading={createJob.isPending}>
-                {createJob.isPending ? 'Creating…' : 'Create role'}
+              <Button type="submit" variant="primary" loading={savingJob.isPending}>
+                {isEditing
+                  ? savingJob.isPending
+                    ? 'Saving…'
+                    : 'Save changes'
+                  : savingJob.isPending
+                    ? 'Creating…'
+                    : 'Create role'}
               </Button>
             </div>
           </form>
         </Modal>
       )}
 
-      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} />}
+      {selectedJob && (
+        <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onEdit={openEditForm} />
+      )}
 
       {isLoading ? (
         <TableSkeleton cols={isAdmin ? 6 : 5} />

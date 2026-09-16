@@ -35,16 +35,26 @@ export interface Job {
   openedAt?: string;
   syncedAt: string;
   description?: string;
-  payRate?: string;
+  // Cost paid to the candidate — SWFS-internal. Only ever present in the API
+  // response for an ADMIN caller; absent (not just hidden) for a CLIENT one.
+  payRate?: number;
+  // Rate charged to the client — the one rate a client is allowed to see.
+  billRate?: number;
+  // billRate - payRate. Only ever present for an ADMIN caller.
+  grossMargin?: number;
   billableHours?: string;
   workType?: WorkType;
   payrollType?: PayrollType;
+  jdUrl?: string;
+  jdFileName?: string;
 }
 
 export interface JobLink {
   jobId: string;
   jobTitle: string;
   stage: CandidateStage;
+  organizationId?: string;
+  organizationName?: string;
 }
 
 export interface CandidateFeedback {
@@ -58,7 +68,6 @@ export interface CandidateFeedback {
 
 export interface Candidate {
   _id: string;
-  organizationId: string;
   firstName: string;
   lastName: string;
   email: string;

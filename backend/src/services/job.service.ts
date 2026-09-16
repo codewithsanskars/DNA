@@ -33,7 +33,8 @@ export const jobService = {
       status?: string;
       openedAt?: string;
       description?: string;
-      payRate?: string;
+      payRate?: number;
+      billRate?: number;
       billableHours?: string;
       workType?: string;
       payrollType?: string;
@@ -47,10 +48,57 @@ export const jobService = {
       openedAt: data.openedAt ? new Date(data.openedAt) : new Date(),
       description: data.description,
       payRate: data.payRate,
+      billRate: data.billRate,
       billableHours: data.billableHours,
       workType: data.workType,
       payrollType: data.payrollType,
       rawData: {},
     });
+  },
+
+  // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
+  updateJob: async (
+    jobId: string,
+    organizationId: string | null,
+    data: {
+      title?: string;
+      department?: string;
+      location?: string;
+      status?: string;
+      description?: string;
+      payRate?: number;
+      billRate?: number;
+      billableHours?: string;
+      workType?: string;
+      payrollType?: string;
+    }
+  ) => {
+    const job = await jobService.getJobById(jobId, organizationId);
+    if (!job) throw new Error('Job not found');
+    return jobRepository.update(jobId, data);
+  },
+
+  // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
+  getDescriptionFile: async (jobId: string, organizationId: string | null) => {
+    const job = await jobService.getJobById(jobId, organizationId);
+    if (!job) return null;
+    return jobRepository.getDescriptionFile(jobId);
+  },
+
+  setDescriptionFile: async (jobId: string, organizationId: string | null, storedName: string, fileName: string) => {
+    const job = await jobService.getJobById(jobId, organizationId);
+    if (!job) throw new Error('Job not found');
+    const previous = await jobRepository.getDescriptionFile(jobId);
+    const updated = await jobRepository.setDescriptionFile(jobId, storedName, fileName);
+    return { job: updated, previous };
+  },
+
+  deleteDescriptionFile: async (jobId: string, organizationId: string | null) => {
+    const job = await jobService.getJobById(jobId, organizationId);
+    if (!job) throw new Error('Job not found');
+    const previous = await jobRepository.getDescriptionFile(jobId);
+    if (!previous) throw new Error('Job has no description on file');
+    const updated = await jobRepository.clearDescriptionFile(jobId);
+    return { job: updated, previous };
   },
 };

@@ -1,9 +1,8 @@
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { RoleBadge } from '../shared/Badge';
-import Avatar from '../shared/Avatar';
 import IconButton from '../shared/IconButton';
+import NotificationBell from './NotificationBell';
+import UserMenu from './UserMenu';
 
 interface HeaderProps {
   title: string;
@@ -15,7 +14,6 @@ interface HeaderProps {
 }
 
 export default function Header({ title, subtitle, onMenuClick, backTo, backLabel }: HeaderProps) {
-  const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -50,6 +48,8 @@ export default function Header({ title, subtitle, onMenuClick, backTo, backLabel
       </div>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <NotificationBell />
+
         <IconButton
           icon={theme === 'dark' ? 'sun' : 'moon'}
           iconSize={15}
@@ -57,14 +57,7 @@ export default function Header({ title, subtitle, onMenuClick, backTo, backLabel
           onClick={toggleTheme}
         />
 
-        {user && (
-          <div className="flex items-center gap-2.5">
-            <div className="hidden sm:block">
-              <RoleBadge role={user.role} />
-            </div>
-            <Avatar name={user.name || user.email} title={user.name} />
-          </div>
-        )}
+        <UserMenu />
       </div>
     </header>
   );

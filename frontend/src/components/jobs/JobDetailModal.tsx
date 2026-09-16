@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
@@ -9,13 +9,17 @@ import { StatusBadge, StageBadge } from '../shared/Badge';
 import Avatar from '../shared/Avatar';
 import DetailRow from '../shared/DetailRow';
 import Icon from '../shared/Icon';
+import { useToast } from '../shared/Toast';
+import { useConfirm } from '../shared/Confirm';
 import { jobApi } from '../../api/job.api';
 import { queryKeys } from '../../api/queryKeys';
 import { useOrganizations } from '../../hooks/useOrganizations';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminRole } from '../../utils/roles';
-import { formatDate } from '../../utils/format';
+import { formatDate, formatRate } from '../../utils/format';
 import { Job, WorkType, PayrollType } from '../../types';
+
+const JD_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const WORK_TYPE_LABELS: Record<WorkType, string> = {
   FULL_TIME: 'Full-Time',
@@ -33,11 +37,23 @@ type Tab = 'details' | 'candidates';
 
 const detailOrDash = (value?: string | null) => value || '—';
 
-export default function JobDetailModal({ job, onClose }: { job: Job; onClose: () => void }) {
+interface JobDetailModalProps {
+  job: Job;
+  onClose: () => void;
+  onEdit?: (job: Job) => void;
+}
+
+export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const { user } = useAuth();
   const isAdmin = isAdminRole(user?.role);
+  const isClient = !isAdmin;
   const [tab, setTab] = useState<Tab>('details');
+  const jdInputRef = useRef<HTMLInputElement>(null);
+  const [downloadingJd, setDownloadingJd] = useState(false);
 
   const { organizations: clients } = useOrganizations({ enabled: isAdmin });
   const clientName = clients?.find((c) => c._id === job.organizationId)?.name;
@@ -47,6 +63,58 @@ export default function JobDetailModal({ job, onClose }: { job: Job; onClose: ()
     queryFn: () => jobApi.getJobPipeline(job._id),
     enabled: tab === 'candidates',
   });
+
+  const invalidateJob = () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+
+  const uploadJd = useMutation({
+    mutationFn: (file: File) => jobApi.uploadJobDescription(job._id, file),
+    onSuccess: () => {
+      invalidateJob();
+      toast.success('Job description attached');
+    },
+    onError: () => toast.error('Couldn’t attach that job description', 'Please try again.'),
+  });
+
+  const deleteJd = useMutation({
+    mutationFn: () => jobApi.deleteJobDescription(job._id),
+    onSuccess: () => {
+      invalidateJob();
+      toast.success('Job description removed');
+    },
+    onError: () => toast.error('Couldn’t remove the job description', 'Please try again.'),
+  });
+
+  const handleJdFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(pdf|docx)$/i.test(file.name)) {
+      toast.error('Job description must be a .pdf or .docx file');
+      return;
+    }
+    uploadJd.mutate(file);
+  };
+
+  const handleDownloadJd = async () => {
+    setDownloadingJd(true);
+    try {
+      await jobApi.downloadJobDescription(job._id, job.jdFileName);
+    } catch {
+      toast.error('Couldn’t download job description', 'Please try again.');
+    } finally {
+      setDownloadingJd(false);
+    }
+  };
+
+  const confirmDeleteJd = async () => {
+    const ok = await confirm({
+      title: 'Remove job description?',
+      description: `This removes the attached job description from "${job.title}".`,
+      confirmLabel: 'Remove file',
+      tone: 'danger',
+    });
+    if (ok) deleteJd.mutate();
+  };
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'details', label: 'Job info' },
@@ -70,6 +138,11 @@ export default function JobDetailModal({ job, onClose }: { job: Job; onClose: ()
               onClick={() => navigate(`/jobs/${job._id}`)}
             >
               Open full candidate list
+            </Button>
+          )}
+          {onEdit && (
+            <Button variant="secondary" size="sm" icon="edit" onClick={() => onEdit(job)}>
+              Edit
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -117,7 +190,15 @@ export default function JobDetailModal({ job, onClose }: { job: Job; onClose: ()
           )}
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4">
-            <DetailRow label="Pay rate">{detailOrDash(job.payRate)}</DetailRow>
+            <DetailRow label="Bill rate">{formatRate(job.billRate)}</DetailRow>
+            {isAdmin && <DetailRow label="Pay rate">{formatRate(job.payRate)}</DetailRow>}
+            {isAdmin && (
+              <DetailRow label="Gross margin">
+                <span className={job.grossMargin != null && job.grossMargin < 0 ? 'text-brand-text' : undefined}>
+                  {formatRate(job.grossMargin)}
+                </span>
+              </DetailRow>
+            )}
             <DetailRow label="Billable hours">{detailOrDash(job.billableHours)}</DetailRow>
             <DetailRow label="Type of work">
               {detailOrDash(job.workType ? WORK_TYPE_LABELS[job.workType] : undefined)}
@@ -127,6 +208,75 @@ export default function JobDetailModal({ job, onClose }: { job: Job; onClose: ()
             </DetailRow>
             {job.openedAt && <DetailRow label="Opened">{formatDate(job.openedAt)}</DetailRow>}
           </dl>
+
+          <div className="border-t border-border pt-4">
+            <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
+              Job description
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {job.jdUrl ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="file"
+                    onClick={handleDownloadJd}
+                    loading={downloadingJd}
+                  >
+                    {job.jdFileName || 'Job description'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="download"
+                    onClick={handleDownloadJd}
+                    loading={downloadingJd}
+                  >
+                    Download
+                  </Button>
+                  {isClient && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="upload"
+                        onClick={() => jdInputRef.current?.click()}
+                        loading={uploadJd.isPending}
+                      >
+                        Replace
+                      </Button>
+                      <Button variant="ghost" size="sm" icon="trash" onClick={confirmDeleteJd}>
+                        Remove
+                      </Button>
+                    </>
+                  )}
+                </>
+              ) : isClient ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="upload"
+                  onClick={() => jdInputRef.current?.click()}
+                  loading={uploadJd.isPending}
+                >
+                  Attach job description
+                </Button>
+              ) : (
+                <p className="text-[13px] text-muted-foreground">
+                  No job description has been attached for this role yet.
+                </p>
+              )}
+              {isClient && (
+                <input
+                  ref={jdInputRef}
+                  type="file"
+                  accept={JD_ACCEPT}
+                  className="hidden"
+                  onChange={handleJdFile}
+                />
+              )}
+            </div>
+          </div>
         </div>
       ) : isLoading ? (
         <div className="py-6">

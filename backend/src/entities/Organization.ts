@@ -10,7 +10,6 @@ import {
 import { OrganizationContact } from './OrganizationContact';
 import { OrganizationMembership } from './OrganizationMembership';
 import { Job } from './Job';
-import { Candidate } from './Candidate';
 
 /** A client company that SWFS recruits for. */
 @Entity('organizations')
@@ -63,9 +62,6 @@ export class Organization {
 
   @OneToMany(() => Job, (job) => job.organization)
   jobs!: Job[];
-
-  @OneToMany(() => Candidate, (candidate) => candidate.organization)
-  candidates!: Candidate[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

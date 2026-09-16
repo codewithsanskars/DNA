@@ -5,24 +5,19 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
-  ManyToOne,
   OneToMany,
 } from 'typeorm';
 import { CandidateSource } from '../types';
 import { CANDIDATE_SOURCES } from './enums';
-import { Organization } from './Organization';
 import { Application } from './Application';
 import { CandidateFeedback } from './CandidateFeedback';
 
-/** A person in the pipeline. Their per-role stage lives on Application. */
+/** A person in the pipeline. Their only link to a client is via the roles
+ *  (Applications) they're linked to — a candidate has no org of its own. */
 @Entity('candidates')
 export class Candidate {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
-
-  @Index()
-  @ManyToOne(() => Organization, (organization) => organization.candidates, { onDelete: 'CASCADE' })
-  organization!: Organization;
 
   @Column()
   firstName!: string;

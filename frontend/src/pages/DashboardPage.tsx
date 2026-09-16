@@ -12,6 +12,7 @@ import { dashboardApi } from '../api/dashboard.api';
 import { queryKeys } from '../api/queryKeys';
 import { useAuth } from '../context/AuthContext';
 import { useReorderable } from '../hooks/useReorderable';
+import { isAdminRole } from '../utils/roles';
 import { humanize, timeAgo } from '../utils/format';
 import { CandidateStage, DashboardSummary } from '../types';
 
@@ -25,7 +26,20 @@ const STAGE_ORDER: CandidateStage[] = [
   'REJECTED',
 ];
 
-type StatKey = 'openJobs' | 'totalCandidates' | 'shortlisted' | 'inInterview' | 'selected';
+type StatKey =
+  | 'openJobs'
+  | 'totalCandidates'
+  | 'shortlisted'
+  | 'inInterview'
+  | 'selected'
+  | 'avgBillRate'
+  | 'totalBillRate'
+  | 'onboarded'
+  | 'offersAccepted'
+  | 'totalMonthlyBilling'
+  | 'totalPayRate'
+  | 'avgPayRate'
+  | 'totalGrossMargin';
 
 const STAT_DEFS: Record<StatKey, { label: string; emphasis?: boolean }> = {
   openJobs: { label: 'Open Roles' },
@@ -33,8 +47,47 @@ const STAT_DEFS: Record<StatKey, { label: string; emphasis?: boolean }> = {
   shortlisted: { label: 'Shortlisted' },
   inInterview: { label: 'In Interview' },
   selected: { label: 'Selected', emphasis: true },
+  avgBillRate: { label: 'Avg. Bill Rate' },
+  totalBillRate: { label: 'Total Bill Rate' },
+  onboarded: { label: 'Onboarded' },
+  offersAccepted: { label: 'Offer Accepted' },
+  totalMonthlyBilling: { label: 'Total Monthly Billing', emphasis: true },
+  totalPayRate: { label: 'Total Pay Rate' },
+  avgPayRate: { label: 'Avg. Pay Rate' },
+  totalGrossMargin: { label: 'Total Gross Margin', emphasis: true },
 };
 const DEFAULT_STAT_ORDER: StatKey[] = ['openJobs', 'totalCandidates', 'shortlisted', 'inInterview', 'selected'];
+
+// Client- and admin-only KPIs. Not yet backed by real data — placeholder
+// values until the backend computes these from actual billing/pay records.
+const CLIENT_ONLY_STAT_ORDER: StatKey[] = [
+  'avgBillRate',
+  'totalBillRate',
+  'onboarded',
+  'offersAccepted',
+  'totalMonthlyBilling',
+];
+const ADMIN_ONLY_STAT_ORDER: StatKey[] = [
+  'totalBillRate',
+  'avgBillRate',
+  'totalPayRate',
+  'avgPayRate',
+  'totalGrossMargin',
+];
+const CLIENT_STATIC_STAT_VALUES: Partial<Record<StatKey, string | number>> = {
+  avgBillRate: '$62/hr',
+  totalBillRate: '$1,240/hr',
+  onboarded: 8,
+  offersAccepted: 5,
+  totalMonthlyBilling: '$48,600',
+};
+const ADMIN_STATIC_STAT_VALUES: Partial<Record<StatKey, string | number>> = {
+  totalBillRate: '$18,400/hr',
+  avgBillRate: '$74/hr',
+  totalPayRate: '$14,200/hr',
+  avgPayRate: '$58/hr',
+  totalGrossMargin: '$4,200/hr',
+};
 
 type SectionKey = 'pipeline' | 'activity';
 const SECTION_LABELS: Record<SectionKey, string> = {
@@ -46,18 +99,24 @@ const DEFAULT_SECTION_ORDER: SectionKey[] = ['pipeline', 'activity'];
 export default function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const isClient = !isAdminRole(user?.role);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: dashboardApi.getSummary,
   });
 
-  const stats = useReorderable<StatKey>('swfs_dashboard_stats_order', DEFAULT_STAT_ORDER);
+  const defaultStatOrder = [
+    ...DEFAULT_STAT_ORDER,
+    ...(isClient ? CLIENT_ONLY_STAT_ORDER : ADMIN_ONLY_STAT_ORDER),
+  ];
+  const staticStatValues = isClient ? CLIENT_STATIC_STAT_VALUES : ADMIN_STATIC_STAT_VALUES;
+  const stats = useReorderable<StatKey>('swfs_dashboard_stats_order', defaultStatOrder);
   const sections = useReorderable<SectionKey>('swfs_dashboard_sections_order', DEFAULT_SECTION_ORDER);
   const [editMode, setEditMode] = useState(false);
 
   const isCustomLayout =
-    stats.order.join() !== DEFAULT_STAT_ORDER.join() || sections.order.join() !== DEFAULT_SECTION_ORDER.join();
+    stats.order.join() !== defaultStatOrder.join() || sections.order.join() !== DEFAULT_SECTION_ORDER.join();
 
   const resetLayout = () => {
     stats.reset();
@@ -152,7 +211,6 @@ export default function DashboardPage() {
   return (
     <AppLayout
       title="Dashboard"
-      subtitle={firstName ? `Welcome back, ${firstName}` : undefined}
       actions={
         <div className="ml-auto flex items-center gap-2">
           {editMode ? (
@@ -199,7 +257,11 @@ export default function DashboardPage() {
                   onMoveBack={() => stats.move(key, -1)}
                   onMoveForward={() => stats.move(key, 1)}
                 >
-                  <StatCard label={def.label} value={data[key]} emphasis={def.emphasis} />
+                  <StatCard
+                    label={def.label}
+                    value={staticStatValues[key] ?? (data as unknown as Record<string, number>)[key]}
+                    emphasis={def.emphasis}
+                  />
                 </DragWidget>
               );
             })}

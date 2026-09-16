@@ -125,7 +125,6 @@ export default function OrganizationPage() {
   return (
     <AppLayout
       title="Organizations"
-      subtitle="Client organizations and contact details"
       actions={
         isAdmin ? (
           <div className="ml-auto">

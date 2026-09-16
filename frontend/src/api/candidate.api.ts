@@ -37,7 +37,6 @@ export const candidateApi = {
 
   createCandidate: async (data: {
     jobId?: string;
-    organizationId?: string;
     firstName: string;
     lastName: string;
     email?: string;
@@ -62,9 +61,11 @@ export const candidateApi = {
   uploadResume: async (id: string, file: File): Promise<Candidate> => {
     const form = new FormData();
     form.append('resume', file);
-    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/resume`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    // No explicit Content-Type here — the browser must generate its own
+    // multipart boundary for FormData bodies. Setting the header ourselves
+    // (even to 'multipart/form-data') suppresses that per the XHR/fetch spec,
+    // so the request goes out with no boundary and the server can't parse it.
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/resume`, form);
     return res.data.data!;
   },
 

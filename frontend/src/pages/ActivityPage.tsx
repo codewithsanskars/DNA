@@ -21,7 +21,7 @@ export default function ActivityPage() {
   });
 
   return (
-    <AppLayout title="Activity Log" subtitle="Audit trail of portal actions">
+    <AppLayout title="Activity Log">
       {isLoading ? (
         <TableSkeleton cols={4} rows={8} />
       ) : (

@@ -93,18 +93,19 @@ const JOBS: {
   status: JobStatus;
   openedAt: string;
   description: string;
-  payRate: string;
+  payRate: number;
+  billRate: number;
   billableHours: string;
   workType: WorkType;
   payrollType: PayrollType;
 }[] = [
-  { key: 'job_001', orgSlug: 'org_techcorp', title: 'Senior Software Engineer', department: 'Engineering', location: 'Remote (US)', status: 'OPEN', openedAt: '2024-11-01', description: 'Own the design and delivery of core backend services for our cloud platform, mentoring mid-level engineers along the way.', payRate: '$70 - $85/hr', billableHours: '40 hrs/week', workType: 'CONTRACT_TO_HIRE', payrollType: 'THIRD_PARTY' },
-  { key: 'job_002', orgSlug: 'org_techcorp', title: 'Frontend Developer', department: 'Engineering', location: 'New York, NY', status: 'OPEN', openedAt: '2024-11-15', description: 'Build and maintain customer-facing React interfaces in close collaboration with product and design.', payRate: '$55 - $65/hr', billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_003', orgSlug: 'org_techcorp', title: 'DevOps Engineer', department: 'Infrastructure', location: 'Austin, TX', status: 'CLOSED', openedAt: '2024-10-01', description: 'Manage CI/CD pipelines and cloud infrastructure across staging and production environments.', payRate: '$75 - $90/hr', billableHours: '35 hrs/week', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
-  { key: 'job_004', orgSlug: 'org_financegroup', title: 'Chief Financial Officer', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-10', description: 'Lead financial strategy, reporting, and treasury operations for a growing investment firm.', payRate: '$220k - $260k/yr', billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_005', orgSlug: 'org_financegroup', title: 'Financial Analyst', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-20', description: 'Support quarterly forecasting, budget variance analysis, and ad hoc financial modeling.', payRate: '$40 - $50/hr', billableHours: '40 hrs/week', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
-  { key: 'job_006', orgSlug: 'org_meridianhealth', title: 'Registered Nurse - ICU', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-05', description: 'Provide direct patient care in a 24-bed ICU, working rotating shifts alongside a multidisciplinary critical care team.', payRate: '$45 - $58/hr', billableHours: '36 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_007', orgSlug: 'org_meridianhealth', title: 'Director of Nursing', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-18', description: 'Oversee nursing staff, scheduling, and clinical quality standards across two hospital campuses.', payRate: '$140k - $165k/yr', billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_001', orgSlug: 'org_techcorp', title: 'Senior Software Engineer', department: 'Engineering', location: 'Remote (US)', status: 'OPEN', openedAt: '2024-11-01', description: 'Own the design and delivery of core backend services for our cloud platform, mentoring mid-level engineers along the way.', payRate: 70, billRate: 90, billableHours: '40 hrs/week', workType: 'CONTRACT_TO_HIRE', payrollType: 'THIRD_PARTY' },
+  { key: 'job_002', orgSlug: 'org_techcorp', title: 'Frontend Developer', department: 'Engineering', location: 'New York, NY', status: 'OPEN', openedAt: '2024-11-15', description: 'Build and maintain customer-facing React interfaces in close collaboration with product and design.', payRate: 55, billRate: 72, billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_003', orgSlug: 'org_techcorp', title: 'DevOps Engineer', department: 'Infrastructure', location: 'Austin, TX', status: 'CLOSED', openedAt: '2024-10-01', description: 'Manage CI/CD pipelines and cloud infrastructure across staging and production environments.', payRate: 75, billRate: 95, billableHours: '35 hrs/week', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
+  { key: 'job_004', orgSlug: 'org_financegroup', title: 'Chief Financial Officer', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-10', description: 'Lead financial strategy, reporting, and treasury operations for a growing investment firm.', payRate: 115, billRate: 145, billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_005', orgSlug: 'org_financegroup', title: 'Financial Analyst', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-20', description: 'Support quarterly forecasting, budget variance analysis, and ad hoc financial modeling.', payRate: 40, billRate: 55, billableHours: '40 hrs/week', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
+  { key: 'job_006', orgSlug: 'org_meridianhealth', title: 'Registered Nurse - ICU', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-05', description: 'Provide direct patient care in a 24-bed ICU, working rotating shifts alongside a multidisciplinary critical care team.', payRate: 48, billRate: 64, billableHours: '36 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_007', orgSlug: 'org_meridianhealth', title: 'Director of Nursing', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-18', description: 'Oversee nursing staff, scheduling, and clinical quality standards across two hospital campuses.', payRate: 72, billRate: 96, billableHours: '40 hrs/week', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
 ];
 
 const CANDIDATES: {
@@ -183,10 +184,9 @@ async function seed() {
   }
 
   for (const c of CANDIDATES) {
-    const org = orgsBySlug.get(c.orgSlug)!;
     const { orgSlug, jobLinks, ...data } = c;
     const candidate = await candidateRepo.save(
-      candidateRepo.create({ ...data, source: data.source ?? 'PORTAL', organization: org })
+      candidateRepo.create({ ...data, source: data.source ?? 'PORTAL' })
     );
     for (const link of jobLinks) {
       const job = jobsByKey.get(link.jobKey)!;

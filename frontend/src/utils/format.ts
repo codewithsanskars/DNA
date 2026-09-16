@@ -37,6 +37,12 @@ export function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Hourly rate: `$85.00/hr`. */
+export function formatRate(value?: number): string {
+  if (value === undefined || value === null) return '—';
+  return `$${value.toFixed(2)}/hr`;
+}
+
 /** First initial of a name or email, uppercased. Falls back to `?`. */
 export function initials(nameOrEmail?: string | null): string {
   return (nameOrEmail || '?').charAt(0).toUpperCase();

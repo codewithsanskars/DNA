@@ -7,7 +7,7 @@ import { uploadResume } from '../middleware/upload.middleware';
 const router = Router();
 
 router.get('/', authenticate, candidateController.getCandidates);
-router.post('/', authenticate, requireRole('CLIENT', 'ADMIN'), candidateController.createCandidate);
+router.post('/', authenticate, requireRole('ADMIN'), candidateController.createCandidate);
 router.get('/:id', authenticate, candidateController.getCandidate);
 router.get('/:id/resume', authenticate, candidateController.downloadResume);
 router.post('/:id/resume', authenticate, requireRole('CLIENT', 'ADMIN'), uploadResume, candidateController.uploadResume);

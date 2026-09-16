@@ -7,17 +7,27 @@ interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  centered?: boolean;
 }
 
-const SIZE_CLASSES: Record<'sm' | 'md' | 'lg' | 'xl', string> = {
+const SIZE_CLASSES: Record<'sm' | 'md' | 'lg' | 'xl' | 'full', string> = {
   sm: 'max-w-sm',
   md: 'max-w-md',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
+  full: 'max-w-[80vw]',
 };
 
-export default function Modal({ title, description, onClose, children, footer, size = 'md' }: ModalProps) {
+export default function Modal({
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  size = 'md',
+  centered = false,
+}: ModalProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
@@ -31,7 +41,9 @@ export default function Modal({ title, description, onClose, children, footer, s
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-[3vh] animate-fade-in"
+      className={`fixed inset-0 z-50 flex ${
+        centered ? 'items-center' : 'items-start'
+      } justify-center overflow-y-auto bg-black/50 p-4 py-[3vh] animate-fade-in`}
       onClick={onClose}
       role="dialog"
       aria-modal="true"

@@ -4,8 +4,6 @@ import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { candidateService } from '../services/candidate.service';
 import { auditLogService } from '../services/auditLog.service';
-import { jobService } from '../services/job.service';
-import { organizationRepository } from '../repositories/organization.repository';
 import { isAdminRole } from '../utils/roles';
 import { RESUME_DIR } from '../middleware/upload.middleware';
 
@@ -107,31 +105,14 @@ export const candidateController = {
 
   createCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { jobId, organizationId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, source } = req.body;
+      const { jobId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, source } = req.body;
       if (!firstName || !lastName) {
         res.status(400).json({ success: false, error: 'firstName and lastName are required' });
         return;
       }
       const candidateSource = ['PORTAL', 'LINKEDIN'].includes(source) ? source : 'PORTAL';
 
-      // Clients always create candidates under their own org. Admins may target any
-      // client — either explicitly, or implicitly via the job the candidate is linked to.
-      let targetOrgId = req.user!.organizationId;
-      if (isAdminRole(req.user!.role)) {
-        if (organizationId) {
-          const org = await organizationRepository.findById(organizationId);
-          if (!org) {
-            res.status(400).json({ success: false, error: 'Selected client not found' });
-            return;
-          }
-          targetOrgId = organizationId;
-        } else if (jobId) {
-          const job = await jobService.getJobById(jobId, null);
-          if (job) targetOrgId = job.organizationId;
-        }
-      }
-
-      const candidate = await candidateService.createCandidate(targetOrgId, jobId || undefined, {
+      const candidate = await candidateService.createCandidate(jobId || undefined, {
         firstName,
         lastName,
         email,

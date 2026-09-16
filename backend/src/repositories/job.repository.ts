@@ -17,10 +17,15 @@ function toDto(job: Job) {
     openedAt: job.openedAt,
     syncedAt: job.updatedAt,
     description: job.description,
-    payRate: job.payRate,
+    // The pg driver returns numeric columns as strings to avoid float
+    // precision loss — convert back to a number for the DTO.
+    payRate: job.payRate != null ? Number(job.payRate) : undefined,
+    billRate: job.billRate != null ? Number(job.billRate) : undefined,
     billableHours: job.billableHours,
     workType: job.workType,
     payrollType: job.payrollType,
+    jdUrl: job.jdUrl ? `/api/jobs/${job.id}/description` : undefined,
+    jdFileName: job.jdFileName,
   };
 }
 
@@ -57,5 +62,35 @@ export const jobRepository = {
 
   incrementCandidateCount: async (id: string, delta = 1) => {
     await repo().increment({ id }, 'totalCandidates', delta);
+  },
+
+  update: async (id: string, data: any) => {
+    await repo().update(id, data);
+    return jobRepository.findById(id);
+  },
+
+  // Returns the on-disk filename + original name for the download route, or
+  // null if the job has no description on file. Kept separate from toDto()
+  // since the stored filename must never reach the client directly.
+  getDescriptionFile: async (id: string) => {
+    const job = await repo().findOne({ where: { id }, select: ['id', 'jdUrl', 'jdFileName'] });
+    if (!job?.jdUrl) return null;
+    return { storedName: job.jdUrl, fileName: job.jdFileName };
+  },
+
+  setDescriptionFile: async (id: string, storedName: string, fileName: string) => {
+    await repo().update(id, { jdUrl: storedName, jdFileName: fileName });
+    return jobRepository.findById(id);
+  },
+
+  clearDescriptionFile: async (id: string) => {
+    // `update()` silently ignores `undefined`/`null` values, so set to NULL via query builder.
+    await repo()
+      .createQueryBuilder()
+      .update(Job)
+      .set({ jdUrl: () => 'NULL', jdFileName: () => 'NULL' })
+      .where('id = :id', { id })
+      .execute();
+    return jobRepository.findById(id);
   },
 };

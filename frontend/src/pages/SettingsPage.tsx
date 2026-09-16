@@ -1,6 +1,5 @@
 import AppLayout from '../components/layout/AppLayout';
 import Card, { CardHeader, CardBody } from '../components/shared/Card';
-import { RoleBadge } from '../components/shared/Badge';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/shared/Icon';
@@ -19,16 +18,14 @@ export default function SettingsPage() {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <AppLayout title="Settings" subtitle="Account and portal preferences">
+    <AppLayout title="Settings">
       <div className="max-w-2xl space-y-6">
         <Card padded={false}>
           <CardHeader title="Your account" />
           <CardBody className="divide-y divide-border py-1">
             <Row label="Name">{user?.name || '—'}</Row>
             <Row label="Email">{user?.email || '—'}</Row>
-            <Row label="Role">
-              <RoleBadge role={user?.role || ''} />
-            </Row>
+            <Row label="Role">{user?.role || ''}</Row>
             <Row label="Organization">{user?.organizationName || '—'}</Row>
           </CardBody>
         </Card>
@@ -39,7 +36,6 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-foreground">Theme</p>
-                <p className="text-xs text-muted-foreground">Currently {theme} mode.</p>
               </div>
               <button
                 onClick={toggleTheme}

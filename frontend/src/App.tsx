@@ -62,7 +62,7 @@ function AppRoutes() {
         <Route path="/auth/callback" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
         <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
         <Route path="/jobs" element={<PrivateRoute><JobsPage /></PrivateRoute>} />
-        <Route path="/search" element={<PrivateRoute><SearchPage /></PrivateRoute>} />
+        <Route path="/search" element={<AdminRoute><SearchPage /></AdminRoute>} />
         <Route path="/jobs/:id" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates/:id" element={<PrivateRoute><CandidateDetailPage /></PrivateRoute>} />

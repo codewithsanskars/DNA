@@ -10,7 +10,9 @@ const NAV: { to: string; label: string; icon: IconName; adminOnly?: boolean }[] 
   { to: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { to: '/jobs', label: 'Open Roles', icon: 'briefcase' },
   { to: '/candidates', label: 'Candidates', icon: 'users' },
-  { to: '/search', label: 'Search', icon: 'search' },
+  // LinkedIn sourcing is an SWFS-staff workflow; a client org has no reason
+  // to see it, so this tab doesn't exist for them at all.
+  { to: '/search', label: 'Search', icon: 'search', adminOnly: true },
   // SWFS staff manage the client roster; a client org has no reason to
   // browse other organizations, so this tab doesn't exist for them at all.
   { to: '/organization', label: 'Organizations', icon: 'building', adminOnly: true },

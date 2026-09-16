@@ -12,9 +12,6 @@ import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
 import { useCandidates } from '../hooks/useCandidates';
-import { useOrganizations } from '../hooks/useOrganizations';
-import { useAuth } from '../context/AuthContext';
-import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 
 const LINKEDIN_PEOPLE_SEARCH = 'https://www.linkedin.com/search/results/people/?keywords=';
@@ -28,15 +25,12 @@ function splitName(full: string) {
 }
 
 export default function SearchPage() {
-  const { user } = useAuth();
-  const isAdmin = isAdminRole(user?.role);
   const queryClient = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
 
   const { data: jobs } = useJobs();
   const { data: candidates } = useCandidates();
-  const { organizations: clients } = useOrganizations({ enabled: isAdmin });
 
   // --- LinkedIn search launcher ----------------------------------------
   const [keywords, setKeywords] = useState(params.get('q') || '');
@@ -67,7 +61,6 @@ export default function SearchPage() {
     phone: params.get('phone') || '',
     website: params.get('website') || '',
     jobId: '',
-    clientId: '',
   });
   const set =
     (k: keyof typeof form) =>
@@ -104,7 +97,6 @@ export default function SearchPage() {
         phone: form.phone.trim() || undefined,
         website: form.website.trim() || undefined,
         jobId: form.jobId || undefined,
-        organizationId: isAdmin ? form.clientId || undefined : undefined,
       });
       if (resumeFile) {
         try {
@@ -132,7 +124,6 @@ export default function SearchPage() {
         phone: '',
         website: '',
         jobId: '',
-        clientId: '',
       });
       setResumeFile(null);
       setResumeInputKey((k) => k + 1);
@@ -141,10 +132,7 @@ export default function SearchPage() {
     onError: () => toast.error('Couldn’t add the candidate', 'Please try again.'),
   });
 
-  const canSubmit =
-    !!form.firstName.trim() &&
-    !!form.lastName.trim() &&
-    (!isAdmin || !!form.jobId || !!form.clientId);
+  const canSubmit = !!form.firstName.trim() && !!form.lastName.trim();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,7 +188,7 @@ export default function SearchPage() {
   );
 
   return (
-    <AppLayout title="Search" subtitle="Find people on LinkedIn and add them to your pipeline">
+    <AppLayout title="Search">
       {/* Search bar */}
       <div className="rounded-lg border border-border bg-card p-5 shadow-xs sm:p-6">
         <form
@@ -387,26 +375,11 @@ export default function SearchPage() {
                 )}
               </Field>
 
-              {isAdmin && !form.jobId && (
-                <Field
-                  label="Client"
-                  required
-                  help="Or link to a role below to set the client automatically."
-                >
-                  {(id) => (
-                    <Select id={id} value={form.clientId} onChange={set('clientId')}>
-                      <option value="">Select a client…</option>
-                      {(clients || []).map((c) => (
-                        <option key={c._id} value={c._id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
-              )}
-
-              <Field label="Link to role" hint="optional">
+              <Field
+                label="Link to role"
+                hint="optional"
+                help="A candidate's client is determined by the role(s) they're linked to."
+              >
                 {(id) => (
                   <Select id={id} value={form.jobId} onChange={set('jobId')}>
                     <option value="">No role yet</option>

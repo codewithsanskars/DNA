@@ -26,6 +26,26 @@ export function requireRole(...roles: UserRole[]) {
   };
 }
 
+// Unlike requireRole, this does NOT respect the ADMIN > CLIENT hierarchy — it
+// matches the caller's role exactly. Use it for actions that are a client-only
+// workflow rather than a minimum permission level (e.g. only the client who
+// owns a role should attach its job description).
+export function requireExactRole(...roles: UserRole[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!roles.includes(req.user.role)) {
+      res.status(403).json({ success: false, error: 'Insufficient permissions' });
+      return;
+    }
+
+    next();
+  };
+}
+
 export function requireOrganizationAccess(
   req: AuthenticatedRequest,
   res: Response,

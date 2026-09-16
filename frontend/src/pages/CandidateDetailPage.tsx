@@ -132,18 +132,18 @@ export default function CandidateDetailPage() {
     mutationFn: (file: File) => candidateApi.uploadResume(id!, file),
     onSuccess: () => {
       invalidate();
-      toast.success('Résumé attached');
+      toast.success('Resume attached');
     },
-    onError: fail('Couldn’t attach that résumé'),
+    onError: fail('Couldn’t attach that resume'),
   });
 
   const deleteResume = useMutation({
     mutationFn: () => candidateApi.deleteResume(id!),
     onSuccess: () => {
       invalidate();
-      toast.success('Résumé removed');
+      toast.success('Resume removed');
     },
-    onError: fail('Couldn’t remove the résumé'),
+    onError: fail('Couldn’t remove the resume'),
   });
 
   const handleResumeFile = (e: React.ChangeEvent<HTMLInputElement>) => {

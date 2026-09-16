@@ -7,13 +7,12 @@ import { CandidateStage } from '../types';
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
 
-const RELATIONS = ['organization', 'applications', 'applications.job', 'feedback'];
+const RELATIONS = ['applications', 'applications.job', 'applications.job.organization', 'feedback'];
 
 function toDto(c: Candidate) {
   return {
     _id: c.id,
     id: c.id,
-    organizationId: c.organization?.id,
     firstName: c.firstName,
     lastName: c.lastName,
     email: c.email,
@@ -35,6 +34,8 @@ function toDto(c: Candidate) {
       jobId: a.job.id,
       jobTitle: a.job.title,
       stage: a.stage,
+      organizationId: a.job.organization?.id,
+      organizationName: a.job.organization?.name,
     })),
     feedback: (c.feedback || [])
       .map((f) => ({
@@ -55,17 +56,16 @@ export const candidateRepository = {
     return candidates.map(toDto);
   },
 
-  // Client view: only candidates actually linked to one of this org's roles —
-  // not every candidate SWFS has filed under the org, just the ones "assigned"
-  // to a job the client posted. (Admin/recruiter callers use findAll instead,
-  // which isn't scoped this way.)
+  // Client view: only candidates actually linked to one of this org's roles.
+  // A candidate has no org of its own — its only relationship to a client is
+  // via the jobs (Applications) it's linked to. (Admin/recruiter callers use
+  // findAll instead, which isn't scoped this way.)
   findByOrganization: async (organizationId: string) => {
     const rows = await appRepo()
       .createQueryBuilder('a')
       .innerJoin('a.candidate', 'c')
       .innerJoin('a.job', 'j')
-      .where('c."organizationId" = :organizationId', { organizationId })
-      .andWhere('j."organizationId" = :organizationId', { organizationId })
+      .where('j."organizationId" = :organizationId', { organizationId })
       .select('DISTINCT c.id', 'id')
       .getRawMany<{ id: string }>();
 
@@ -80,14 +80,17 @@ export const candidateRepository = {
     return candidates.map(toDto);
   },
 
-  // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
-  findByJob: async (jobId: string, organizationId: string | null) => {
+  // Callers are expected to have already verified job ownership (e.g. via
+  // jobService.getJobById(jobId, orgScope)) before calling this.
+  findByJob: async (jobId: string) => {
     const apps = await appRepo().find({ where: { job: { id: jobId } }, relations: ['candidate'] });
     const candidateIds = [...new Set(apps.map((a) => a.candidate.id))];
     if (!candidateIds.length) return [];
-    const where: any = { id: In(candidateIds) };
-    if (organizationId) where.organization = { id: organizationId };
-    const candidates = await repo().find({ where, relations: RELATIONS, order: { createdAt: 'DESC' } });
+    const candidates = await repo().find({
+      where: { id: In(candidateIds) },
+      relations: RELATIONS,
+      order: { createdAt: 'DESC' },
+    });
     return candidates.map(toDto);
   },
 
@@ -96,11 +99,22 @@ export const candidateRepository = {
     return candidate ? toDto(candidate) : null;
   },
 
-  create: async (organizationId: string, data: any) => {
+  // Same rule as findByOrganization: true only if the candidate is linked via
+  // an Application to a job this org posted.
+  isLinkedToOrganization: async (id: string, organizationId: string) => {
+    const count = await appRepo()
+      .createQueryBuilder('a')
+      .innerJoin('a.candidate', 'c')
+      .innerJoin('a.job', 'j')
+      .where('c.id = :id', { id })
+      .andWhere('j."organizationId" = :organizationId', { organizationId })
+      .getCount();
+    return count > 0;
+  },
+
+  create: async (data: any) => {
     const { jobLinks, rawData, ...rest } = data;
-    const candidate = await repo().save(
-      repo().create({ ...rest, organization: { id: organizationId } } as DeepPartial<Candidate>)
-    );
+    const candidate = await repo().save(repo().create({ ...rest } as DeepPartial<Candidate>));
     for (const link of jobLinks || []) {
       await appRepo().save(
         appRepo().create({
@@ -191,11 +205,11 @@ export const candidateRepository = {
 
     const qb = appRepo()
       .createQueryBuilder('a')
-      .innerJoin('a.candidate', 'c')
+      .innerJoin('a.job', 'j')
       .select('a.stage', 'stage')
       .addSelect('COUNT(*)', 'count')
       .groupBy('a.stage');
-    if (organizationId) qb.andWhere('c."organizationId" = :organizationId', { organizationId });
+    if (organizationId) qb.andWhere('j."organizationId" = :organizationId', { organizationId });
 
     const rows = await qb.getRawMany<{ stage: string; count: string }>();
     for (const row of rows) counts[row.stage] = parseInt(row.count, 10);

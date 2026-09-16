@@ -12,16 +12,21 @@ export const candidateService = {
     return candidateRepository.findByOrganization(organizationId);
   },
 
-  // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
-  getCandidatesForJob: async (jobId: string, organizationId: string | null) => {
-    return candidateRepository.findByJob(jobId, organizationId);
+  // Caller must have already verified job ownership before calling this.
+  getCandidatesForJob: async (jobId: string) => {
+    return candidateRepository.findByJob(jobId);
   },
 
   // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
+  // For a client caller, visibility requires the candidate be linked (via Application)
+  // to a job that client posted — same rule as getCandidatesForOrganization's list view.
   getCandidateById: async (candidateId: string, organizationId: string | null) => {
     const candidate = await candidateRepository.findById(candidateId);
     if (!candidate) return null;
-    if (organizationId && candidate.organizationId !== organizationId) return null;
+    if (organizationId) {
+      const linked = await candidateRepository.isLinkedToOrganization(candidateId, organizationId);
+      if (!linked) return null;
+    }
     return candidate;
   },
 
@@ -70,7 +75,6 @@ export const candidateService = {
   },
 
   createCandidate: async (
-    organizationId: string,
     jobId: string | undefined,
     data: {
       firstName: string;
@@ -90,14 +94,12 @@ export const candidateService = {
 
     if (jobId) {
       const job = await jobRepository.findById(jobId);
-      if (!job || job.organizationId !== organizationId) {
-        throw new Error('Job not found');
-      }
+      if (!job) throw new Error('Job not found');
       jobLinks = [{ jobId, jobTitle: job.title, stage: 'APPLIED' }];
       await jobRepository.incrementCandidateCount(jobId);
     }
 
-    return candidateRepository.create(organizationId, {
+    return candidateRepository.create({
       firstName: data.firstName,
       lastName: data.lastName,
       email: data.email ?? '',
