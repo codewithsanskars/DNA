@@ -17,6 +17,7 @@ import ActivityPage from './pages/ActivityPage';
 import SettingsPage from './pages/SettingsPage';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 import LoginSplash from './components/auth/LoginSplash';
+import OktaRegisterModal from './components/auth/OktaRegisterModal';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -50,11 +51,26 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { user, justSignedIn, dismissJustSignedIn } = useAuth();
+  const {
+    user,
+    justSignedIn,
+    dismissJustSignedIn,
+    pendingOktaRegistration,
+    completeOktaRegistration,
+    cancelOktaRegistration,
+  } = useAuth();
 
   return (
     <>
       {justSignedIn && <LoginSplash onDone={dismissJustSignedIn} />}
+      {pendingOktaRegistration && (
+        <OktaRegisterModal
+          email={pendingOktaRegistration.email}
+          name={pendingOktaRegistration.name}
+          onSubmit={completeOktaRegistration}
+          onCancel={cancelOktaRegistration}
+        />
+      )}
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
         {/* Okta redirects here with ?token=… — AuthContext exchanges it for the

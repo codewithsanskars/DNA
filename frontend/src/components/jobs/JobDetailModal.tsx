@@ -29,8 +29,8 @@ const WORK_TYPE_LABELS: Record<WorkType, string> = {
 };
 
 const PAYROLL_LABELS: Record<PayrollType, string> = {
-  THIRD_PARTY: 'Third Party',
-  IN_HOUSE: "Client's Own Payroll",
+  THIRD_PARTY: 'SWFS Payroll',
+  IN_HOUSE: "Own Payroll",
 };
 
 type Tab = 'details' | 'candidates';

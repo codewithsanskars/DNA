@@ -18,4 +18,15 @@ export const authApi = {
   },
 
   getOktaLoginUrl: (): string => '/api/auth/okta/login',
+
+  completeOktaRegistration: async (
+    pendingToken: string,
+    organizationName: string
+  ): Promise<{ token: string; user: AuthUser }> => {
+    const res = await api.post<ApiResponse<{ token: string; user: AuthUser }>>('/auth/okta/register', {
+      pendingToken,
+      organizationName,
+    });
+    return res.data.data!;
+  },
 };

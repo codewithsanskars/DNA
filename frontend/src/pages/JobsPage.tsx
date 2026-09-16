@@ -18,6 +18,13 @@ import { useToast } from '../components/shared/Toast';
 import { formatDate } from '../utils/format';
 import { Job, WorkType, PayrollType } from '../types';
 
+// Billable hours are standardized to hrs/day across the portal — the form
+// only collects the number and appends the unit, so every job (old
+// "hrs/week" entries included) reads consistently once edited.
+const parseHoursPerDay = (value?: string): string => value?.match(/[\d.]+/)?.[0] || '';
+const formatHoursPerDay = (value: string): string | undefined =>
+  value.trim() ? `${value.trim()} hrs/day` : undefined;
+
 export default function JobsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -68,7 +75,7 @@ export default function JobsPage() {
     setDescription(job.description || '');
     setPayRate(job.payRate != null ? String(job.payRate) : '');
     setBillRate(job.billRate != null ? String(job.billRate) : '');
-    setBillableHours(job.billableHours || '');
+    setBillableHours(parseHoursPerDay(job.billableHours));
     setWorkType(job.workType || 'FULL_TIME');
     setPayrollType(job.payrollType || 'THIRD_PARTY');
     setClientId(job.organizationId || '');
@@ -112,7 +119,7 @@ export default function JobsPage() {
         description: description.trim() || undefined,
         payRate: isAdmin ? parsedPayRate : undefined,
         billRate: parsedBillRate,
-        billableHours: billableHours.trim() || undefined,
+        billableHours: formatHoursPerDay(billableHours),
         workType,
         payrollType,
       });
@@ -126,7 +133,7 @@ export default function JobsPage() {
       description: description.trim() || undefined,
       payRate: isAdmin ? parsedPayRate : undefined,
       billRate: parsedBillRate,
-      billableHours: billableHours.trim() || undefined,
+      billableHours: formatHoursPerDay(billableHours),
       workType,
       payrollType,
       organizationId: isAdmin ? clientId : undefined,
@@ -251,13 +258,17 @@ export default function JobsPage() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Billable hours">
+              <Field label="Billable hours" hint="hrs/day">
                 {(id) => (
                   <Input
                     id={id}
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.5}
                     value={billableHours}
                     onChange={(e) => setBillableHours(e.target.value)}
-                    placeholder="e.g. 40 hrs/week"
+                    placeholder="e.g. 8"
                   />
                 )}
               </Field>
@@ -282,7 +293,7 @@ export default function JobsPage() {
                     onChange={(e) => setPayrollType(e.target.value as PayrollType)}
                   >
                     <option value="THIRD_PARTY">Third Party</option>
-                    <option value="IN_HOUSE">Client's Own Payroll</option>
+                    <option value="IN_HOUSE">Own Payroll</option>
                   </Select>
                 )}
               </Field>

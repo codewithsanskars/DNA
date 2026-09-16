@@ -2,6 +2,12 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { AuthUser } from '../types';
 import { authApi } from '../api/auth.api';
 
+interface PendingOktaRegistration {
+  pendingToken: string;
+  email: string;
+  name: string;
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
@@ -11,6 +17,10 @@ interface AuthContextValue {
   /** True for a moment right after a fresh sign-in (not a resumed session) — drives the post-login logo animation. */
   justSignedIn: boolean;
   dismissJustSignedIn: () => void;
+  /** Set when Okta confirmed a new identity but no local account exists yet — drives the "pick your organization" modal. */
+  pendingOktaRegistration: PendingOktaRegistration | null;
+  completeOktaRegistration: (organizationName: string) => Promise<void>;
+  cancelOktaRegistration: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -20,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(localStorage.getItem('swfs_token'));
   const [isLoading, setIsLoading] = useState(true);
   const [justSignedIn, setJustSignedIn] = useState(false);
+  const [pendingOktaRegistration, setPendingOktaRegistration] = useState<PendingOktaRegistration | null>(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('swfs_token');
@@ -37,11 +48,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Handle SSO callback token in URL
+  // Handle SSO callback token — or, for a first-time Okta identity, the
+  // "please pick your organization" handoff — in the URL.
   useEffect(() => {
+    if (window.location.pathname !== '/auth/callback') return;
     const params = new URLSearchParams(window.location.search);
+
     const callbackToken = params.get('token');
-    if (callbackToken && window.location.pathname === '/auth/callback') {
+    if (callbackToken) {
       localStorage.setItem('swfs_token', callbackToken);
       setToken(callbackToken);
       window.history.replaceState({}, '', '/');
@@ -52,6 +66,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setJustSignedIn(true);
         })
         .finally(() => setIsLoading(false));
+      return;
+    }
+
+    if (params.get('register') === '1') {
+      const pendingToken = params.get('pendingToken') || '';
+      const email = params.get('email') || '';
+      const name = params.get('name') || '';
+      window.history.replaceState({}, '', '/login');
+      setPendingOktaRegistration({ pendingToken, email, name });
+      setIsLoading(false);
     }
   }, []);
 
@@ -71,9 +95,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const dismissJustSignedIn = () => setJustSignedIn(false);
 
+  const completeOktaRegistration = async (organizationName: string) => {
+    if (!pendingOktaRegistration) return;
+    const result = await authApi.completeOktaRegistration(pendingOktaRegistration.pendingToken, organizationName);
+    localStorage.setItem('swfs_token', result.token);
+    setToken(result.token);
+    setUser(result.user);
+    setJustSignedIn(true);
+    setPendingOktaRegistration(null);
+  };
+
+  const cancelOktaRegistration = () => setPendingOktaRegistration(null);
+
   return (
     <AuthContext.Provider
-      value={{ user, token, isLoading, login, logout, justSignedIn, dismissJustSignedIn }}
+      value={{
+        user,
+        token,
+        isLoading,
+        login,
+        logout,
+        justSignedIn,
+        dismissJustSignedIn,
+        pendingOktaRegistration,
+        completeOktaRegistration,
+        cancelOktaRegistration,
+      }}
     >
       {children}
     </AuthContext.Provider>

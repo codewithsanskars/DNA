@@ -84,10 +84,41 @@ export const authController = {
       const { idToken } = await oktaService.exchangeCode(code, codeVerifier);
       const profile = await oktaService.verifyIdToken(idToken);
       const result = await authService.handleOktaCallback(profile);
+
+      if (result.status === 'register') {
+        const params = new URLSearchParams({
+          register: '1',
+          pendingToken: result.pendingToken,
+          email: result.email,
+          name: result.name,
+        });
+        res.redirect(`${env.frontendUrl}/auth/callback?${params.toString()}`);
+        return;
+      }
+
       res.redirect(`${env.frontendUrl}/auth/callback?token=${result.token}`);
     } catch (err) {
       console.error('[Okta] callback failed:', (err as Error).message);
       redirectToLoginError(res, 'okta_failed');
+    }
+  },
+
+  // Submitted by the "which organization are you with?" modal shown after a
+  // first-time Okta sign-in — creates the account and its CLIENT membership.
+  // Handled here instead of via next(err) so a thrown validation message
+  // (expired token, blank org name) surfaces as a 400, not the generic
+  // error handler's default 500.
+  completeOktaRegistration: async (req: Request, res: Response) => {
+    try {
+      const { pendingToken, organizationName } = req.body;
+      if (!pendingToken || !organizationName) {
+        res.status(400).json({ success: false, error: 'pendingToken and organizationName are required' });
+        return;
+      }
+      const result = await authService.completeOktaRegistration(pendingToken, organizationName);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
     }
   },
 

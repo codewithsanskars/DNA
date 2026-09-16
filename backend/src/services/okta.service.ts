@@ -104,6 +104,7 @@ export const oktaService = {
       throw new Error(`Okta token exchange failed (${res.status}): ${text}`);
     }
     const data = (await res.json()) as { id_token?: string };
+    console.log('[Okta] raw token response:', JSON.stringify(data, null, 2));
     if (!data.id_token) throw new Error('Okta token response had no id_token');
     return { idToken: data.id_token };
   },
@@ -126,6 +127,7 @@ export const oktaService = {
             preferred_username?: string;
             name?: string;
           };
+          console.log('[Okta] decoded ID token claims:', JSON.stringify(claims, null, 2));
           const email = claims.email || claims.preferred_username;
           if (!claims.sub || !email) {
             reject(new Error('Okta ID token is missing sub/email claims'));
