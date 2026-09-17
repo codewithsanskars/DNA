@@ -130,33 +130,44 @@ export const authService = {
     return { token, user: { ...jwtPayload, name: user.name } };
   },
 
-  // Shared tail for both login paths: resolve the org + role (known demo
-  // mapping, else an existing membership, else default CLIENT), record the
+  // Shared tail for both login paths: resolve the org + role (an existing
+  // membership, else the known demo mapping, else default CLIENT), record the
   // login, and issue our own JWT.
   completeLogin: async (user: UserRecord, normalizedEmail: string): Promise<{ token: string; user: any }> => {
-    const mapping = MOCK_USER_ORG_MAP[normalizedEmail];
-    let org = await organizationRepository.findBySlug(mapping?.orgSlug || DEFAULT_ORG_SLUG);
-    let role: UserRole = mapping?.role || 'CLIENT';
-    if (!mapping) {
-      const existingMemberships = await userRepository.findOrganizationsForUser(user.id);
-      if (existingMemberships[0]) {
-        role = existingMemberships[0].role as UserRole;
-        org = await organizationRepository.findById(existingMemberships[0].organizationId);
-      }
-    }
-    if (!org) org = await organizationRepository.findBySlug(DEFAULT_ORG_SLUG);
+    // A real membership wins over MOCK_USER_ORG_MAP: the map is only a
+    // bootstrap for seeded demo accounts, so it must not drag a user who has
+    // since been placed in a different organization back to its hard-coded one.
+    const [membership] = await userRepository.findOrganizationsForUser(user.id);
+    let org = membership ? await organizationRepository.findById(membership.organizationId) : null;
+    let role: UserRole = (membership?.role as UserRole) || 'CLIENT';
 
-    if (org) {
-      await userRepository.addToOrganization({ organizationId: org.id, userId: user.id, role });
+    if (!org) {
+      const mapping = MOCK_USER_ORG_MAP[normalizedEmail];
+      role = mapping?.role || 'CLIENT';
+      org = await organizationRepository.findBySlug(mapping?.orgSlug || DEFAULT_ORG_SLUG);
     }
+
+    // Fail here rather than issuing a token with an empty organizationId:
+    // '' is not a valid uuid, so every org-scoped query would blow up with an
+    // opaque "invalid input syntax for type uuid" 500 on some later request.
+    if (!org) {
+      throw Object.assign(
+        new Error(
+          `No organization found for ${normalizedEmail}. Seed the database (npm run seed) or add this user to an organization.`
+        ),
+        { statusCode: 403 }
+      );
+    }
+
+    await userRepository.addToOrganization({ organizationId: org.id, userId: user.id, role });
     await userRepository.updateLastLogin(user.id);
 
     const payload: JwtPayload = {
       userId: user.id,
       email: user.email,
       role,
-      organizationId: org?.id || '',
-      organizationName: org?.name || 'TechCorp Inc',
+      organizationId: org.id,
+      organizationName: org.name,
     };
 
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn as any });

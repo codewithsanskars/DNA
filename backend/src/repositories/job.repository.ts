@@ -13,6 +13,7 @@ function toDto(job: Job) {
     department: job.department,
     location: job.location,
     status: job.status,
+    priority: job.priority,
     totalCandidates: job.totalCandidates,
     openedAt: job.openedAt,
     syncedAt: job.updatedAt,

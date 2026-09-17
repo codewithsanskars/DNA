@@ -1,5 +1,5 @@
 import api from './axios';
-import { ApiResponse, Job, Candidate, WorkType, PayrollType } from '../types';
+import { ApiResponse, Job, Candidate, WorkType, PayrollType, JobPriority } from '../types';
 
 export const jobApi = {
   getJobs: async (): Promise<Job[]> => {
@@ -22,6 +22,7 @@ export const jobApi = {
     department?: string;
     location?: string;
     status?: string;
+    priority?: JobPriority;
     openedAt?: string;
     description?: string;
     payRate?: number;
@@ -42,6 +43,7 @@ export const jobApi = {
       department?: string;
       location?: string;
       status?: string;
+      priority?: JobPriority;
       description?: string;
       payRate?: number;
       billRate?: number;

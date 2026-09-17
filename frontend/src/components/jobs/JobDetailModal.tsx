@@ -5,7 +5,7 @@ import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import { CenteredSpinner } from '../shared/LoadingSpinner';
 import { EmptyState } from '../shared/States';
-import { StatusBadge, StageBadge } from '../shared/Badge';
+import { StatusBadge, StageBadge, PriorityBadge } from '../shared/Badge';
 import Avatar from '../shared/Avatar';
 import DetailRow from '../shared/DetailRow';
 import Icon from '../shared/Icon';
@@ -17,9 +17,11 @@ import { useOrganizations } from '../../hooks/useOrganizations';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminRole } from '../../utils/roles';
 import { formatDate, formatRate } from '../../utils/format';
+import { errorMessage } from '../../utils/errors';
 import { Job, WorkType, PayrollType } from '../../types';
 
-const JD_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export const JD_ACCEPT =
+  '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const WORK_TYPE_LABELS: Record<WorkType, string> = {
   FULL_TIME: 'Full-Time',
@@ -72,7 +74,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
       invalidateJob();
       toast.success('Job description attached');
     },
-    onError: () => toast.error('Couldn’t attach that job description', 'Please try again.'),
+    onError: (err) => toast.error('Couldn’t attach that job description', errorMessage(err, 'Please try again.')),
   });
 
   const deleteJd = useMutation({
@@ -81,7 +83,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
       invalidateJob();
       toast.success('Job description removed');
     },
-    onError: () => toast.error('Couldn’t remove the job description', 'Please try again.'),
+    onError: (err) => toast.error('Couldn’t remove the job description', errorMessage(err, 'Please try again.')),
   });
 
   const handleJdFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -172,6 +174,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
             <StatusBadge status={job.status} />
+            <PriorityBadge priority={job.priority} />
             {job.department && <span>{job.department}</span>}
             {job.location && (
               <span className="inline-flex items-center gap-1">
@@ -190,6 +193,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
           )}
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4">
+            <DetailRow label="Location">{detailOrDash(job.location)}</DetailRow>
             <DetailRow label="Bill rate">{formatRate(job.billRate)}</DetailRow>
             {isAdmin && <DetailRow label="Pay rate">{formatRate(job.payRate)}</DetailRow>}
             {isAdmin && (

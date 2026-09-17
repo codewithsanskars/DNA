@@ -8,6 +8,16 @@ import { auditLogService } from '../services/auditLog.service';
 import { organizationRepository } from '../repositories/organization.repository';
 import { isAdminRole } from '../utils/roles';
 import { JOB_DESCRIPTION_DIR } from '../middleware/upload.middleware';
+import { JOB_STATUSES, JOB_PRIORITIES, WORK_TYPES, PAYROLL_TYPES } from '../entities/enums';
+
+// Matches the Job entity's `numeric(10,2)` column definition — anything over
+// this overflows the column and Postgres throws, which would otherwise
+// surface as an opaque 500 instead of a clear validation message.
+const MAX_RATE = 99_999_999.99;
+
+function badRequest(message: string): Error & { statusCode: number } {
+  return Object.assign(new Error(message), { statusCode: 400 });
+}
 
 // payRate is SWFS-internal cost data — never let it (or the margin derived
 // from it) reach a client response, no matter what the repository returns.
@@ -25,10 +35,26 @@ function scopeJobForRole<T extends { payRate?: number; billRate?: number }>(
   return { ...job, grossMargin };
 }
 
-function parseRate(value: unknown): number | undefined {
+function parseRate(value: unknown, label: string): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const num = Number(value);
-  return Number.isFinite(num) ? num : undefined;
+  if (!Number.isFinite(num)) throw badRequest(`${label} must be a number`);
+  if (num < 0) throw badRequest(`${label} can't be negative`);
+  // Locale pinned to 'en-US' — toLocaleString() without one follows the
+  // runtime's default locale, which grouped digits Indian-style
+  // ("$9,99,99,999.99") on this host instead of "$99,999,999.99".
+  if (num > MAX_RATE) throw badRequest(`${label} must be $${MAX_RATE.toLocaleString('en-US')} or less`);
+  return num;
+}
+
+// Rejects a value that isn't one of the entity's known enum members — an
+// out-of-range value would otherwise reach Postgres and throw an "invalid
+// input value for enum ..." error, surfaced as an opaque 500.
+function assertEnumValue<T extends string>(value: unknown, allowed: readonly T[], label: string): void {
+  if (value === undefined || value === null || value === '') return;
+  if (!allowed.includes(value as T)) {
+    throw badRequest(`${label} must be one of: ${allowed.join(', ')}`);
+  }
 }
 
 export const jobController = {
@@ -74,11 +100,15 @@ export const jobController = {
 
   createJob: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { title, department, location, status, openedAt, description, payRate, billRate, billableHours, workType, payrollType, organizationId } = req.body;
+      const { title, department, location, status, priority, openedAt, description, payRate, billRate, billableHours, workType, payrollType, organizationId } = req.body;
       if (!title) {
         res.status(400).json({ success: false, error: 'Title is required' });
         return;
       }
+      assertEnumValue(status, JOB_STATUSES, 'Status');
+      assertEnumValue(priority, JOB_PRIORITIES, 'Priority');
+      assertEnumValue(workType, WORK_TYPES, 'Type of work');
+      assertEnumValue(payrollType, PAYROLL_TYPES, 'Payroll');
       const isAdmin = isAdminRole(req.user!.role);
 
       // Only SWFS admin/recruiter may assign a job to a client other than their own org.
@@ -97,12 +127,13 @@ export const jobController = {
         department,
         location,
         status,
+        priority,
         openedAt,
         description,
         // Pay rate is SWFS-internal cost data — only admins may set it, no
         // matter what a client's request body happens to include.
-        payRate: isAdmin ? parseRate(payRate) : undefined,
-        billRate: parseRate(billRate),
+        payRate: isAdmin ? parseRate(payRate, 'Pay rate') : undefined,
+        billRate: parseRate(billRate, 'Bill rate'),
         billableHours,
         workType,
         payrollType,
@@ -116,7 +147,11 @@ export const jobController = {
 
   updateJob: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { title, department, location, status, description, payRate, billRate, billableHours, workType, payrollType } = req.body;
+      const { title, department, location, status, priority, description, payRate, billRate, billableHours, workType, payrollType } = req.body;
+      assertEnumValue(status, JOB_STATUSES, 'Status');
+      assertEnumValue(priority, JOB_PRIORITIES, 'Priority');
+      assertEnumValue(workType, WORK_TYPES, 'Type of work');
+      assertEnumValue(payrollType, PAYROLL_TYPES, 'Payroll');
       const isAdmin = isAdminRole(req.user!.role);
       const orgScope = isAdmin ? null : req.user!.organizationId;
       const job = await jobService.updateJob(req.params.id, orgScope, {
@@ -124,11 +159,12 @@ export const jobController = {
         department,
         location,
         status,
+        priority,
         description,
         // Pay rate is SWFS-internal cost data — only admins may set it, no
         // matter what a client's request body happens to include.
-        payRate: isAdmin ? parseRate(payRate) : undefined,
-        billRate: parseRate(billRate),
+        payRate: isAdmin ? parseRate(payRate, 'Pay rate') : undefined,
+        billRate: parseRate(billRate, 'Bill rate'),
         billableHours,
         workType,
         payrollType,

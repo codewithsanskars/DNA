@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { AppDataSource } from '../config/data-source';
 import { Organization, User, OrganizationMembership, Job, Candidate, Application } from '../entities';
-import { UserRole, JobStatus, WorkType, PayrollType, CandidateStage, CandidateSource } from '../types';
+import { UserRole, JobStatus, JobPriority, WorkType, PayrollType, CandidateStage, CandidateSource } from '../types';
 
 /**
  * Seeds the local Postgres database with the portal's demo dataset — the
@@ -91,6 +91,7 @@ const JOBS: {
   department?: string;
   location?: string;
   status: JobStatus;
+  priority: JobPriority;
   openedAt: string;
   description: string;
   payRate: number;
@@ -99,13 +100,13 @@ const JOBS: {
   workType: WorkType;
   payrollType: PayrollType;
 }[] = [
-  { key: 'job_001', orgSlug: 'org_techcorp', title: 'Senior Software Engineer', department: 'Engineering', location: 'Remote (US)', status: 'OPEN', openedAt: '2024-11-01', description: 'Own the design and delivery of core backend services for our cloud platform, mentoring mid-level engineers along the way.', payRate: 70, billRate: 90, billableHours: '8 hrs/day', workType: 'CONTRACT_TO_HIRE', payrollType: 'THIRD_PARTY' },
-  { key: 'job_002', orgSlug: 'org_techcorp', title: 'Frontend Developer', department: 'Engineering', location: 'New York, NY', status: 'OPEN', openedAt: '2024-11-15', description: 'Build and maintain customer-facing React interfaces in close collaboration with product and design.', payRate: 55, billRate: 72, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_003', orgSlug: 'org_techcorp', title: 'DevOps Engineer', department: 'Infrastructure', location: 'Austin, TX', status: 'CLOSED', openedAt: '2024-10-01', description: 'Manage CI/CD pipelines and cloud infrastructure across staging and production environments.', payRate: 75, billRate: 95, billableHours: '7 hrs/day', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
-  { key: 'job_004', orgSlug: 'org_financegroup', title: 'Chief Financial Officer', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-10', description: 'Lead financial strategy, reporting, and treasury operations for a growing investment firm.', payRate: 115, billRate: 145, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_005', orgSlug: 'org_financegroup', title: 'Financial Analyst', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', openedAt: '2024-11-20', description: 'Support quarterly forecasting, budget variance analysis, and ad hoc financial modeling.', payRate: 40, billRate: 55, billableHours: '8 hrs/day', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
-  { key: 'job_006', orgSlug: 'org_meridianhealth', title: 'Registered Nurse - ICU', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-05', description: 'Provide direct patient care in a 24-bed ICU, working rotating shifts alongside a multidisciplinary critical care team.', payRate: 48, billRate: 64, billableHours: '7.2 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
-  { key: 'job_007', orgSlug: 'org_meridianhealth', title: 'Director of Nursing', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', openedAt: '2024-11-18', description: 'Oversee nursing staff, scheduling, and clinical quality standards across two hospital campuses.', payRate: 72, billRate: 96, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_001', orgSlug: 'org_techcorp', title: 'Senior Software Engineer', department: 'Engineering', location: 'Remote (US)', status: 'OPEN', priority: 'HIGH', openedAt: '2024-11-01', description: 'Own the design and delivery of core backend services for our cloud platform, mentoring mid-level engineers along the way.', payRate: 70, billRate: 90, billableHours: '8 hrs/day', workType: 'CONTRACT_TO_HIRE', payrollType: 'THIRD_PARTY' },
+  { key: 'job_002', orgSlug: 'org_techcorp', title: 'Frontend Developer', department: 'Engineering', location: 'New York, NY', status: 'OPEN', priority: 'MEDIUM', openedAt: '2024-11-15', description: 'Build and maintain customer-facing React interfaces in close collaboration with product and design.', payRate: 55, billRate: 72, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_003', orgSlug: 'org_techcorp', title: 'DevOps Engineer', department: 'Infrastructure', location: 'Austin, TX', status: 'CLOSED', priority: 'LOW', openedAt: '2024-10-01', description: 'Manage CI/CD pipelines and cloud infrastructure across staging and production environments.', payRate: 75, billRate: 95, billableHours: '7 hrs/day', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
+  { key: 'job_004', orgSlug: 'org_financegroup', title: 'Chief Financial Officer', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', priority: 'HIGH', openedAt: '2024-11-10', description: 'Lead financial strategy, reporting, and treasury operations for a growing investment firm.', payRate: 115, billRate: 145, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_005', orgSlug: 'org_financegroup', title: 'Financial Analyst', department: 'Finance', location: 'Chicago, IL', status: 'OPEN', priority: 'MEDIUM', openedAt: '2024-11-20', description: 'Support quarterly forecasting, budget variance analysis, and ad hoc financial modeling.', payRate: 40, billRate: 55, billableHours: '8 hrs/day', workType: 'CONTRACT', payrollType: 'THIRD_PARTY' },
+  { key: 'job_006', orgSlug: 'org_meridianhealth', title: 'Registered Nurse - ICU', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', priority: 'HIGH', openedAt: '2024-11-05', description: 'Provide direct patient care in a 24-bed ICU, working rotating shifts alongside a multidisciplinary critical care team.', payRate: 48, billRate: 64, billableHours: '7.2 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
+  { key: 'job_007', orgSlug: 'org_meridianhealth', title: 'Director of Nursing', department: 'Clinical Operations', location: 'Boston, MA', status: 'OPEN', priority: 'LOW', openedAt: '2024-11-18', description: 'Oversee nursing staff, scheduling, and clinical quality standards across two hospital campuses.', payRate: 72, billRate: 96, billableHours: '8 hrs/day', workType: 'FULL_TIME', payrollType: 'IN_HOUSE' },
 ];
 
 const CANDIDATES: {

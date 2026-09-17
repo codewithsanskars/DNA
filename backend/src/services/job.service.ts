@@ -31,6 +31,7 @@ export const jobService = {
       department?: string;
       location?: string;
       status?: string;
+      priority?: string;
       openedAt?: string;
       description?: string;
       payRate?: number;
@@ -45,6 +46,7 @@ export const jobService = {
       department: data.department,
       location: data.location,
       status: data.status || 'OPEN',
+      priority: data.priority || 'MEDIUM',
       openedAt: data.openedAt ? new Date(data.openedAt) : new Date(),
       description: data.description,
       payRate: data.payRate,
@@ -65,6 +67,7 @@ export const jobService = {
       department?: string;
       location?: string;
       status?: string;
+      priority?: string;
       description?: string;
       payRate?: number;
       billRate?: number;

@@ -11,6 +11,8 @@ export type CandidateStage =
 
 export type JobStatus = 'OPEN' | 'CLOSED' | 'ON_HOLD';
 
+export type JobPriority = 'LOW' | 'MEDIUM' | 'HIGH';
+
 export type WorkType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'CONTRACT_TO_HIRE';
 
 export type PayrollType = 'THIRD_PARTY' | 'IN_HOUSE';
@@ -31,6 +33,7 @@ export interface Job {
   department?: string;
   location?: string;
   status: JobStatus;
+  priority: JobPriority;
   totalCandidates: number;
   openedAt?: string;
   syncedAt: string;

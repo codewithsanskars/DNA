@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 import { OrganizationSocialLinks } from '../types';
+import { errorMessage } from '../utils/errors';
 
 const EMPTY_FORM = {
   name: '',
@@ -32,11 +33,6 @@ const EMPTY_FORM = {
   facebook: '',
   instagram: '',
 };
-
-function errorMessage(err: unknown, fallback: string): string {
-  const anyErr = err as { response?: { data?: { error?: string } } };
-  return anyErr?.response?.data?.error || fallback;
-}
 
 export default function OrganizationPage() {
   const navigate = useNavigate();

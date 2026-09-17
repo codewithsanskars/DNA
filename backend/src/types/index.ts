@@ -15,6 +15,8 @@ export type CandidateSource = 'PORTAL' | 'LINKEDIN';
 
 export type JobStatus = 'OPEN' | 'CLOSED' | 'ON_HOLD';
 
+export type JobPriority = 'LOW' | 'MEDIUM' | 'HIGH';
+
 export type WorkType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'CONTRACT_TO_HIRE';
 
 export type PayrollType = 'THIRD_PARTY' | 'IN_HOUSE';

@@ -1,8 +1,14 @@
 import axios from 'axios';
 
+// No default Content-Type here — axios sets the right one per request on
+// its own (application/json for a plain object body, multipart/form-data
+// with a boundary for a FormData body). A blanket 'application/json'
+// default here would make axios JSON-stringify FormData uploads (résumé,
+// job description) instead of sending them as multipart, since it treats
+// an explicit JSON content-type as instruction to serialize the body — see
+// axios's defaults/index.js transformRequest.
 const api = axios.create({
   baseURL: '/api',
-  headers: { 'Content-Type': 'application/json' },
 });
 
 api.interceptors.request.use((config) => {

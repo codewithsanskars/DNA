@@ -8,8 +8,8 @@ import {
   ManyToOne,
   OneToMany,
 } from 'typeorm';
-import { JobStatus, WorkType, PayrollType } from '../types';
-import { JOB_STATUSES, WORK_TYPES, PAYROLL_TYPES } from './enums';
+import { JobStatus, JobPriority, WorkType, PayrollType } from '../types';
+import { JOB_STATUSES, JOB_PRIORITIES, WORK_TYPES, PAYROLL_TYPES } from './enums';
 import { Organization } from './Organization';
 import { Application } from './Application';
 
@@ -34,6 +34,10 @@ export class Job {
 
   @Column({ type: 'enum', enum: JOB_STATUSES, default: 'OPEN' })
   status!: JobStatus;
+
+  /** How urgently this role needs to be filled — set by the client at creation, editable any time. */
+  @Column({ type: 'enum', enum: JOB_PRIORITIES, default: 'MEDIUM' })
+  priority!: JobPriority;
 
   @Column({ type: 'timestamptz', nullable: true })
   openedAt?: Date;

@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
-import { StatusBadge } from '../components/shared/Badge';
+import { StatusBadge, PriorityBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
 import Modal from '../components/shared/Modal';
 import { Field, Input, Select, Textarea } from '../components/shared/Field';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
 import { TableSkeleton } from '../components/shared/States';
-import JobDetailModal from '../components/jobs/JobDetailModal';
+import Icon from '../components/shared/Icon';
+import JobDetailModal, { JD_ACCEPT } from '../components/jobs/JobDetailModal';
 import { jobApi } from '../api/job.api';
 import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
@@ -15,8 +16,15 @@ import { useOrganizations } from '../hooks/useOrganizations';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
+import { useConfirm } from '../components/shared/Confirm';
 import { formatDate } from '../utils/format';
-import { Job, WorkType, PayrollType } from '../types';
+import { errorMessage } from '../utils/errors';
+import { Job, WorkType, PayrollType, JobPriority } from '../types';
+
+// Matches the backend's numeric(10,2) column limit for payRate/billRate
+// (see job.controller.ts) — caps the input so the browser itself discourages
+// a value the API would otherwise reject.
+const MAX_RATE = 99_999_999.99;
 
 // Billable hours are standardized to hrs/day across the portal — the form
 // only collects the number and appends the unit, so every job (old
@@ -29,7 +37,9 @@ export default function JobsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const isAdmin = isAdminRole(user?.role);
+  const isClient = !isAdmin;
   const [showForm, setShowForm] = useState(false);
   const [editingJob, setEditingJob] = useState<Job | null>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -42,7 +52,14 @@ export default function JobsPage() {
   const [billableHours, setBillableHours] = useState('');
   const [workType, setWorkType] = useState<WorkType>('FULL_TIME');
   const [payrollType, setPayrollType] = useState<PayrollType>('THIRD_PARTY');
+  const [priority, setPriority] = useState<JobPriority>('MEDIUM');
   const [clientId, setClientId] = useState('');
+  // Only relevant while creating a role (it has no id yet, so there's nothing
+  // to upload against) — queued locally and uploaded right after the role is
+  // created. When editing, the job already has an id, so jdUpload/jdDelete
+  // below act on it directly instead.
+  const [pendingJdFile, setPendingJdFile] = useState<File | null>(null);
+  const jdInputRef = useRef<HTMLInputElement>(null);
 
   const { data: jobs, isLoading } = useJobs();
   const { organizations: clients, clientName } = useOrganizations({ enabled: isAdmin });
@@ -59,7 +76,9 @@ export default function JobsPage() {
     setBillableHours('');
     setWorkType('FULL_TIME');
     setPayrollType('THIRD_PARTY');
+    setPriority('MEDIUM');
     setClientId('');
+    setPendingJdFile(null);
   };
 
   const openCreateForm = () => {
@@ -78,6 +97,7 @@ export default function JobsPage() {
     setBillableHours(parseHoursPerDay(job.billableHours));
     setWorkType(job.workType || 'FULL_TIME');
     setPayrollType(job.payrollType || 'THIRD_PARTY');
+    setPriority(job.priority || 'MEDIUM');
     setClientId(job.organizationId || '');
     setSelectedJob(null);
     setShowForm(true);
@@ -85,13 +105,75 @@ export default function JobsPage() {
 
   const createJob = useMutation({
     mutationFn: jobApi.createJob,
-    onSuccess: (job) => {
+    onSuccess: async (job) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
       resetForm();
-      toast.success('Role created', job?.title ? `“${job.title}” is now open.` : undefined);
+      if (!pendingJdFile) {
+        toast.success('Role created', job?.title ? `“${job.title}” is now open.` : undefined);
+        return;
+      }
+      // The role now has an id, so the queued file can go up. Reported
+      // separately from role creation since it's a second request that can
+      // fail independently (bad file, size limit) even though the role
+      // itself was created fine.
+      try {
+        await jobApi.uploadJobDescription(job._id, pendingJdFile);
+        queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+        toast.success('Role created', `“${job.title}” is now open, with its job description attached.`);
+      } catch (err) {
+        toast.error(
+          `“${job.title}” was created, but the job description couldn’t be attached`,
+          errorMessage(err, 'You can attach it from the role’s details.')
+        );
+      }
     },
-    onError: () => toast.error('Couldn’t create the role', 'Please try again.'),
+    onError: (err) => toast.error('Couldn’t create the role', errorMessage(err, 'Please try again.')),
   });
+
+  const uploadJd = useMutation({
+    mutationFn: (file: File) => jobApi.uploadJobDescription(editingJob!._id, file),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      setEditingJob(job);
+      toast.success('Job description attached');
+    },
+    onError: (err) => toast.error('Couldn’t attach that job description', errorMessage(err, 'Please try again.')),
+  });
+
+  const deleteJd = useMutation({
+    mutationFn: () => jobApi.deleteJobDescription(editingJob!._id),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      setEditingJob(job);
+      toast.success('Job description removed');
+    },
+    onError: (err) => toast.error('Couldn’t remove the job description', errorMessage(err, 'Please try again.')),
+  });
+
+  const handleJdFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(pdf|docx)$/i.test(file.name)) {
+      toast.error('Job description must be a .pdf or .docx file');
+      return;
+    }
+    if (isEditing) {
+      uploadJd.mutate(file);
+    } else {
+      setPendingJdFile(file);
+    }
+  };
+
+  const confirmDeleteJd = async () => {
+    const ok = await confirm({
+      title: 'Remove job description?',
+      description: `This removes the attached job description from "${editingJob?.title}".`,
+      confirmLabel: 'Remove file',
+      tone: 'danger',
+    });
+    if (ok) deleteJd.mutate();
+  };
 
   const updateJob = useMutation({
     mutationFn: (data: Parameters<typeof jobApi.updateJob>[1]) => jobApi.updateJob(editingJob!._id, data),
@@ -100,7 +182,7 @@ export default function JobsPage() {
       resetForm();
       toast.success('Role updated', job?.title ? `“${job.title}” was saved.` : undefined);
     },
-    onError: () => toast.error('Couldn’t update the role', 'Please try again.'),
+    onError: (err) => toast.error('Couldn’t update the role', errorMessage(err, 'Please try again.')),
   });
 
   const isEditing = !!editingJob;
@@ -122,6 +204,7 @@ export default function JobsPage() {
         billableHours: formatHoursPerDay(billableHours),
         workType,
         payrollType,
+        priority,
       });
       return;
     }
@@ -136,6 +219,7 @@ export default function JobsPage() {
       billableHours: formatHoursPerDay(billableHours),
       workType,
       payrollType,
+      priority,
       organizationId: isAdmin ? clientId : undefined,
     });
   };
@@ -234,6 +318,7 @@ export default function JobsPage() {
                       id={id}
                       type="number"
                       min="0"
+                      max={MAX_RATE}
                       step="0.01"
                       value={payRate}
                       onChange={(e) => setPayRate(e.target.value)}
@@ -248,6 +333,7 @@ export default function JobsPage() {
                     id={id}
                     type="number"
                     min="0"
+                    max={MAX_RATE}
                     step="0.01"
                     value={billRate}
                     onChange={(e) => setBillRate(e.target.value)}
@@ -299,9 +385,128 @@ export default function JobsPage() {
               </Field>
             </div>
 
+            <Field label="Priority" hint="How urgently this role needs to be filled">
+              {(id) => (
+                <div className="flex items-center gap-3">
+                  <Select
+                    id={id}
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as JobPriority)}
+                    className="max-w-[160px]"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                  </Select>
+                  <PriorityBadge priority={priority} />
+                </div>
+              )}
+            </Field>
+
+            {isClient && (
+              <div className="border-t border-border pt-4">
+                <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
+                  Job description
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {isEditing ? (
+                    editingJob?.jdUrl ? (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 text-[13px] text-foreground">
+                          <Icon name="file" size={14} className="text-muted-foreground" />
+                          {editingJob.jdFileName || 'Job description'}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          icon="upload"
+                          onClick={() => jdInputRef.current?.click()}
+                          loading={uploadJd.isPending}
+                        >
+                          Replace
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          icon="trash"
+                          onClick={confirmDeleteJd}
+                          loading={deleteJd.isPending}
+                        >
+                          Remove
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        icon="upload"
+                        onClick={() => jdInputRef.current?.click()}
+                        loading={uploadJd.isPending}
+                      >
+                        Attach job description
+                      </Button>
+                    )
+                  ) : pendingJdFile ? (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 text-[13px] text-foreground">
+                        <Icon name="file" size={14} className="text-muted-foreground" />
+                        {pendingJdFile.name}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        icon="upload"
+                        onClick={() => jdInputRef.current?.click()}
+                      >
+                        Change
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        icon="trash"
+                        onClick={() => setPendingJdFile(null)}
+                      >
+                        Remove
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      icon="upload"
+                      onClick={() => jdInputRef.current?.click()}
+                    >
+                      Attach job description
+                    </Button>
+                  )}
+                  <input
+                    ref={jdInputRef}
+                    type="file"
+                    accept={JD_ACCEPT}
+                    className="hidden"
+                    onChange={handleJdFile}
+                  />
+                </div>
+                {!isEditing && pendingJdFile && (
+                  <p className="mt-1.5 text-2xs text-muted-foreground">
+                    Will be attached once the role is created.
+                  </p>
+                )}
+              </div>
+            )}
+
             {savingJob.isError && (
               <p className="text-xs text-brand-text">
-                {isEditing ? 'Failed to update the role. Please try again.' : 'Failed to create the role. Please try again.'}
+                {errorMessage(
+                  savingJob.error,
+                  isEditing ? 'Failed to update the role. Please try again.' : 'Failed to create the role. Please try again.'
+                )}
               </p>
             )}
 

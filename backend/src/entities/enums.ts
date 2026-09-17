@@ -3,6 +3,7 @@ import {
   CandidateStage,
   CandidateSource,
   JobStatus,
+  JobPriority,
   WorkType,
   PayrollType,
 } from '../types';
@@ -26,6 +27,8 @@ export const CANDIDATE_STAGES: CandidateStage[] = [
 export const CANDIDATE_SOURCES: CandidateSource[] = ['PORTAL', 'LINKEDIN'];
 
 export const JOB_STATUSES: JobStatus[] = ['OPEN', 'CLOSED', 'ON_HOLD'];
+
+export const JOB_PRIORITIES: JobPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
 
 export const WORK_TYPES: WorkType[] = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'CONTRACT_TO_HIRE'];
 
