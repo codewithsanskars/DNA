@@ -64,6 +64,9 @@ pids/
 # Uploaded files (resumes, etc.)
 backend/uploads/
 
+# Documentation (kept local, not pushed)
+docs/
+
 # Temporary files
 *.tmp
 *.temp
