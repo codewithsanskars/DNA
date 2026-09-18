@@ -533,7 +533,7 @@ export default function CandidateDetailPage() {
 
             {feedbackList.length > 0 ? (
               <ul className="mt-4 space-y-3">
-                {feedbackList.map(( f ) => (
+                {feedbackList.map((f) => (
                   <li key={f.id} className="rounded-md border border-border bg-background p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-2.5">
