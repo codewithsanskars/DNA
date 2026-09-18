@@ -19,8 +19,6 @@ import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 
-const ROLE_FILTER_UNLINKED = '__UNLINKED__';
-
 export default function CandidatesPage() {
   const navigate = useNavigate();
   const { id: jobIdParam } = useParams<{ id?: string }>();
@@ -28,7 +26,6 @@ export default function CandidatesPage() {
   const { user } = useAuth();
   const toast = useToast();
   const isAdmin = isAdminRole(user?.role);
-  const [roleFilter, setRoleFilter] = useState<string>(jobIdParam || '');
   const [showForm, setShowForm] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -83,11 +80,9 @@ export default function CandidatesPage() {
     return names.length ? names.join(', ') : '—';
   };
 
-  const filtered = (candidates || []).filter((c) => {
-    if (!roleFilter) return true;
-    if (roleFilter === ROLE_FILTER_UNLINKED) return c.jobLinks.length === 0;
-    return c.jobLinks.some((l) => l.jobId === roleFilter);
-  });
+  const filtered = jobIdParam
+    ? (candidates || []).filter((c) => c.jobLinks.some((l) => l.jobId === jobIdParam))
+    : candidates || [];
 
   return (
     <AppLayout
@@ -96,25 +91,6 @@ export default function CandidatesPage() {
       backLabel="Back to roles"
       actions={
         <>
-          <div className="flex items-center gap-2">
-            <label htmlFor="role-filter" className="text-[13px] text-muted-foreground">
-              Role
-            </label>
-            <Select
-              id="role-filter"
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="w-56"
-            >
-              <option value="">All candidates</option>
-              <option value={ROLE_FILTER_UNLINKED}>Not linked to any role</option>
-              {(jobs || []).map((j) => (
-                <option key={j._id} value={j._id}>
-                  {j.title}
-                </option>
-              ))}
-            </Select>
-          </div>
           {isAdmin && (
             <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
               New candidate
@@ -259,7 +235,7 @@ export default function CandidatesPage() {
             ))}
             {filtered.length === 0 && (
               <EmptyRow colSpan={isAdmin ? 5 : 4}>
-                {roleFilter ? 'No candidates match this filter.' : 'No candidates yet.'}
+                {jobIdParam ? 'No candidates linked to this role.' : 'No candidates yet.'}
               </EmptyRow>
             )}
           </tbody>
