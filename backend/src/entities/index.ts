@@ -6,4 +6,5 @@ export { Job } from './Job';
 export { Candidate } from './Candidate';
 export { Application } from './Application';
 export { CandidateFeedback } from './CandidateFeedback';
+export { InterviewFeedback } from './InterviewFeedback';
 export { AuditLog } from './AuditLog';

@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { humanize, formatDateTime } from '../utils/format';
 import { useToast } from '../components/shared/Toast';
 import { useConfirm } from '../components/shared/Confirm';
+import { isAdminRole } from '../utils/roles';
 
 const CAN_ACT_ROLES = ['ADMIN', 'CLIENT'];
 const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -56,10 +57,14 @@ export default function CandidateDetailPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const canAct = CAN_ACT_ROLES.includes(user?.role || '');
+  const canManageResume = isAdminRole(user?.role);
 
   const [feedback, setFeedback] = useState('');
   const [rating, setRating] = useState(0);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [activeRoundFeedback, setActiveRoundFeedback] = useState<{ jobId: string; round: number } | null>(null);
+  const [roundFeedbackText, setRoundFeedbackText] = useState('');
+  const [roundFeedbackRating, setRoundFeedbackRating] = useState(0);
   const [linkJobId, setLinkJobId] = useState('');
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
@@ -113,9 +118,30 @@ export default function CandidateDetailPage() {
       ),
     onSuccess: () => {
       invalidate();
-      toast.success('Interview requested');
+      toast.success('Interview scheduled');
     },
-    onError: fail('Couldn’t request an interview'),
+    onError: fail('Couldn’t schedule the interview'),
+  });
+
+  const submitInterviewFeedback = useMutation({
+    mutationFn: () => {
+      if (!activeRoundFeedback) return Promise.reject(new Error('No active round'));
+      return candidateApi.submitInterviewFeedback(
+        id!,
+        activeRoundFeedback.jobId,
+        activeRoundFeedback.round,
+        roundFeedbackText,
+        roundFeedbackRating || undefined
+      );
+    },
+    onSuccess: () => {
+      setActiveRoundFeedback(null);
+      setRoundFeedbackText('');
+      setRoundFeedbackRating(0);
+      invalidate();
+      toast.success('Interview feedback submitted');
+    },
+    onError: fail('Couldn’t submit interview feedback'),
   });
 
   const linkToJob = useMutation({
@@ -185,6 +211,10 @@ export default function CandidateDetailPage() {
     }
   };
 
+  const handleNoResumeDownload = () => {
+    toast.error('No résumé has been attached for this candidate yet');
+  };
+
   const confirmDeleteResume = async () => {
     const ok = await confirm({
       title: 'Remove résumé?',
@@ -207,20 +237,28 @@ export default function CandidateDetailPage() {
     onError: fail('Couldn’t submit feedback'),
   });
 
-  // Opens Outlook Web's "new event" composer prefilled for this interview —
-  // frontend-only for now, no Graph API/backend integration. The organizer
-  // still has to toggle "Teams meeting" on in Outlook before sending; there's
-  // no public deeplink param to force that on.
-  const scheduleTeamsMeeting = (jobTitle: string) => {
+  // Opens Google Calendar's "new event" composer prefilled for this interview
+  // round — frontend-only, no Calendar API/backend integration. Fire-and-
+  // forget: we advance the round as soon as this is clicked, regardless of
+  // whether the user actually finishes creating the event in the new tab.
+  const scheduleGoogleCalendar = (jobTitle: string, round: number) => {
     if (!candidate) return;
     const params = new URLSearchParams({
-      path: '/calendar/action/compose',
-      rru: 'addevent',
-      subject: `Interview: ${fullName} — ${jobTitle}`,
-      body: `Interview with ${fullName} for the ${jobTitle} role. Toggle "Teams meeting" on above before sending the invite.`,
+      action: 'TEMPLATE',
+      text: `Interview Round ${round}: ${fullName} — ${jobTitle}`,
+      details: `Interview round ${round} with ${fullName} for the ${jobTitle} role.`,
     });
-    if (candidate.email) params.set('to', candidate.email);
-    window.open(`https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`, '_blank', 'noopener');
+    if (candidate.email) params.set('add', candidate.email);
+    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank', 'noopener');
+  };
+
+  const handleScheduleRound = (jobId: string, jobTitle: string, round: number) => {
+    scheduleGoogleCalendar(jobTitle, round);
+    requestInterview.mutate(jobId);
+  };
+
+  const handleRollOutOffer = () => {
+    toast.info('Coming soon', 'Rolling out offer letters isn’t built yet.');
   };
 
   const confirmReject = async (jobId: string, jobTitle: string) => {
@@ -265,6 +303,17 @@ export default function CandidateDetailPage() {
   const feedbackList = candidate.feedback ?? [];
   const linkedJobIds = new Set(candidate.jobLinks.map((l) => l.jobId));
   const availableJobs = (jobs || []).filter((j) => !linkedJobIds.has(j._id));
+
+  // One card per (job link, round) pair that's been scheduled so far — cards
+  // accumulate as rounds progress and never disappear once a round is added.
+  const roundCards = candidate.jobLinks.flatMap((link) =>
+    Array.from({ length: link.interviewRound }, (_, i) => i + 1).map((round) => ({
+      jobId: link.jobId,
+      jobTitle: link.jobTitle,
+      round,
+      entries: link.interviewFeedback.filter((f) => f.round === round),
+    }))
+  );
 
   return (
     <AppLayout
@@ -364,7 +413,7 @@ export default function CandidateDetailPage() {
                     >
                       Download
                     </Button>
-                    {canAct && (
+                    {canManageResume && (
                       <>
                         <Button
                           variant="ghost"
@@ -381,20 +430,22 @@ export default function CandidateDetailPage() {
                       </>
                     )}
                   </>
+                ) : canManageResume ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="upload"
+                    onClick={() => resumeInputRef.current?.click()}
+                    loading={uploadResume.isPending}
+                  >
+                    Attach résumé
+                  </Button>
                 ) : (
-                  canAct && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon="upload"
-                      onClick={() => resumeInputRef.current?.click()}
-                      loading={uploadResume.isPending}
-                    >
-                      Attach résumé
-                    </Button>
-                  )
+                  <Button variant="secondary" size="sm" icon="download" onClick={handleNoResumeDownload}>
+                    Download résumé
+                  </Button>
                 )}
-                {canAct && (
+                {canManageResume && (
                   <input
                     ref={resumeInputRef}
                     type="file"
@@ -513,6 +564,123 @@ export default function CandidateDetailPage() {
               )
             )}
           </div>
+
+          {roundCards.map(({ jobId, jobTitle, round, entries }) => {
+            const isOpen = activeRoundFeedback?.jobId === jobId && activeRoundFeedback?.round === round;
+            return (
+              <div key={`${jobId}-${round}`} className="rounded-lg border border-border bg-card p-5 shadow-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-foreground">
+                    <span className="truncate">
+                      Interview {round} feedback <span className="font-normal text-subtle-foreground">— {jobTitle}</span>
+                    </span>
+                    {entries.length > 0 && (
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 text-2xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                        {entries.length}
+                      </span>
+                    )}
+                  </h3>
+                  {canAct && !isOpen && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="plus"
+                      className="shrink-0"
+                      onClick={() => setActiveRoundFeedback({ jobId, round })}
+                    >
+                      Add Interview {round} feedback
+                    </Button>
+                  )}
+                </div>
+
+                {canAct && isOpen && (
+                  <div className="mt-4 space-y-3 rounded-md border border-border bg-background p-3">
+                    <Textarea
+                      value={roundFeedbackText}
+                      onChange={(e) => setRoundFeedbackText(e.target.value)}
+                      placeholder={`Share your assessment of round ${round}…`}
+                      rows={3}
+                      autoFocus
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Rating</span>
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3, 4, 5].map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            aria-label={`${r} star${r > 1 ? 's' : ''}`}
+                            onClick={() => setRoundFeedbackRating(r === roundFeedbackRating ? 0 : r)}
+                            className={`transition-colors ${
+                              r <= roundFeedbackRating ? 'text-amber-400' : 'text-border-strong hover:text-amber-400/60'
+                            }`}
+                          >
+                            <Icon name="star" size={18} className={r <= roundFeedbackRating ? 'fill-current' : ''} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {submitInterviewFeedback.isError && (
+                      <p className="text-xs text-brand-text">Couldn’t submit feedback. Please try again.</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => submitInterviewFeedback.mutate()}
+                        disabled={!roundFeedbackText.trim()}
+                        loading={submitInterviewFeedback.isPending}
+                      >
+                        {submitInterviewFeedback.isPending ? 'Submitting…' : 'Submit feedback'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setActiveRoundFeedback(null);
+                          setRoundFeedbackText('');
+                          setRoundFeedbackRating(0);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {entries.length > 0 ? (
+                  <ul className="mt-4 space-y-3">
+                    {entries.map((f) => (
+                      <li key={f.id} className="rounded-md border border-border bg-background p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <Avatar name={f.author} size="xs" />
+                            <div className="min-w-0">
+                              <p className="truncate text-[13px] font-medium text-foreground">{f.author}</p>
+                              <p className="text-2xs text-subtle-foreground">
+                                {f.authorRole ? `${humanize(f.authorRole)} · ` : ''}
+                                {formatDateTime(f.createdAt)}
+                              </p>
+                            </div>
+                          </div>
+                          {f.rating ? <Stars value={f.rating} /> : null}
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+                          {f.comment}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  !isOpen && (
+                    <p className="mt-3 text-[13px] text-muted-foreground">
+                      {canAct ? 'No feedback yet for this round.' : 'No feedback has been shared for this round yet.'}
+                    </p>
+                  )
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Linked positions */}
@@ -542,44 +710,43 @@ export default function CandidateDetailPage() {
                         <p className="truncate text-sm font-medium text-foreground">{link.jobTitle}</p>
                         <StageBadge stage={link.stage} />
                       </div>
-                      {canAct && (
-                        <div className="mt-3 grid grid-cols-3 gap-1.5">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => shortlist.mutate(link.jobId)}
-                            disabled={isPending || link.stage === 'SHORTLISTED'}
-                          >
-                            Shortlist
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => requestInterview.mutate(link.jobId)}
-                            disabled={isPending || link.stage === 'INTERVIEW'}
-                          >
-                            Interview
-                          </Button>
+                      {canAct && !['REJECTED', 'OFFER', 'HIRED'].includes(link.stage) && (
+                        <div className="mt-3 grid grid-cols-2 gap-1.5">
+                          {link.stage !== 'SHORTLISTED' && link.interviewRound === 0 ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => shortlist.mutate(link.jobId)}
+                              disabled={isPending}
+                            >
+                              Shortlist
+                            </Button>
+                          ) : link.interviewRound < 3 ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="calendar"
+                              onClick={() =>
+                                handleScheduleRound(link.jobId, link.jobTitle, link.interviewRound + 1)
+                              }
+                              disabled={isPending}
+                            >
+                              {link.interviewRound === 0 ? 'Interview' : `Schedule round ${link.interviewRound + 1}`}
+                            </Button>
+                          ) : (
+                            <Button variant="primary" size="sm" onClick={handleRollOutOffer} disabled={isPending}>
+                              Roll out offer letter
+                            </Button>
+                          )}
                           <Button
                             variant="danger"
                             size="sm"
                             onClick={() => confirmReject(link.jobId, link.jobTitle)}
-                            disabled={isPending || link.stage === 'REJECTED'}
+                            disabled={isPending}
                           >
                             Reject
                           </Button>
                         </div>
-                      )}
-                      {canAct && link.stage === 'INTERVIEW' && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon="calendar"
-                          className="mt-1.5 w-full"
-                          onClick={() => scheduleTeamsMeeting(link.jobTitle)}
-                        >
-                          Schedule Teams meeting
-                        </Button>
                       )}
                     </div>
                   );
