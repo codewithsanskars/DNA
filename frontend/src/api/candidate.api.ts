@@ -35,6 +35,22 @@ export const candidateApi = {
     await api.post(`/candidates/${id}/feedback`, { feedback, rating });
   },
 
+  submitInterviewFeedback: async (
+    id: string,
+    jobId: string,
+    round: number,
+    feedback: string,
+    rating?: number
+  ): Promise<Candidate> => {
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/interview-feedback`, {
+      jobId,
+      round,
+      feedback,
+      rating,
+    });
+    return res.data.data!;
+  },
+
   createCandidate: async (data: {
     jobId?: string;
     firstName: string;

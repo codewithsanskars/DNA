@@ -30,9 +30,11 @@ const WORK_TYPE_LABELS: Record<WorkType, string> = {
   CONTRACT_TO_HIRE: 'Contract-to-Hire',
 };
 
-const PAYROLL_LABELS: Record<PayrollType, string> = {
-  THIRD_PARTY: 'SWFS Payroll',
-  IN_HOUSE: "Own Payroll",
+// IN_HOUSE reads differently depending on who's looking: from SWFS's side
+// the client runs their own payroll; from the client's side it's their own.
+const payrollLabel = (type: PayrollType, isAdmin: boolean): string => {
+  if (type === 'THIRD_PARTY') return 'SWFS';
+  return isAdmin ? 'Client Payroll' : 'Own Payroll';
 };
 
 type Tab = 'details' | 'candidates';
@@ -208,7 +210,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
               {detailOrDash(job.workType ? WORK_TYPE_LABELS[job.workType] : undefined)}
             </DetailRow>
             <DetailRow label="Payroll">
-              {detailOrDash(job.payrollType ? PAYROLL_LABELS[job.payrollType] : undefined)}
+              {detailOrDash(job.payrollType ? payrollLabel(job.payrollType, isAdmin) : undefined)}
             </DetailRow>
             {job.openedAt && <DetailRow label="Opened">{formatDate(job.openedAt)}</DetailRow>}
           </dl>

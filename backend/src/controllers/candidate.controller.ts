@@ -81,6 +81,43 @@ export const candidateController = {
     }
   },
 
+  submitInterviewFeedback: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { jobId, round, feedback, rating } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      if (!Number.isInteger(round) || round < 1 || round > 3) {
+        res.status(400).json({ success: false, error: 'round must be 1, 2, or 3' });
+        return;
+      }
+      if (!feedback || !String(feedback).trim()) {
+        res.status(400).json({ success: false, error: 'feedback is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const result = await candidateService.submitInterviewFeedback(
+        req.params.id,
+        jobId,
+        round,
+        orgScope,
+        String(feedback).trim(),
+        rating,
+        { email: req.user!.email, role: req.user!.role }
+      );
+      await auditLogService.log(req.user!, 'SUBMIT_INTERVIEW_FEEDBACK', 'candidate', req.params.id, {
+        jobId,
+        round,
+        feedback,
+        rating,
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   submitFeedback: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { feedback, rating } = req.body;

@@ -10,6 +10,7 @@ import {
   Candidate,
   Application,
   CandidateFeedback,
+  InterviewFeedback,
   AuditLog,
 } from '../entities';
 
@@ -22,6 +23,7 @@ const entities = [
   Candidate,
   Application,
   CandidateFeedback,
+  InterviewFeedback,
   AuditLog,
 ];
 

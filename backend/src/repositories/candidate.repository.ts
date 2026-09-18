@@ -1,13 +1,20 @@
 import { In, DeepPartial } from 'typeorm';
 import { AppDataSource } from '../config/data-source';
-import { Candidate, Application, CandidateFeedback } from '../entities';
+import { Candidate, Application, CandidateFeedback, InterviewFeedback } from '../entities';
 import { CANDIDATE_STAGES } from '../entities/enums';
 import { CandidateStage } from '../types';
 
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
+const interviewFeedbackRepo = () => AppDataSource.getRepository(InterviewFeedback);
 
-const RELATIONS = ['applications', 'applications.job', 'applications.job.organization', 'feedback'];
+const RELATIONS = [
+  'applications',
+  'applications.job',
+  'applications.job.organization',
+  'applications.interviewFeedback',
+  'feedback',
+];
 
 function toDto(c: Candidate) {
   return {
@@ -36,6 +43,18 @@ function toDto(c: Candidate) {
       stage: a.stage,
       organizationId: a.job.organization?.id,
       organizationName: a.job.organization?.name,
+      interviewRound: a.interviewRound,
+      interviewFeedback: (a.interviewFeedback || [])
+        .map((f) => ({
+          id: f.id,
+          round: f.round,
+          author: f.authorEmail,
+          authorRole: f.authorRole,
+          comment: f.comment,
+          rating: f.rating,
+          createdAt: f.createdAt,
+        }))
+        .sort((x, y) => x.round - y.round || x.createdAt.getTime() - y.createdAt.getTime()),
     })),
     feedback: (c.feedback || [])
       .map((f) => ({
@@ -145,6 +164,44 @@ export const candidateRepository = {
       .set({ stage, stageUpdatedAt: new Date() })
       .where('candidateId = :id AND jobId = :jobId', { id, jobId })
       .execute();
+    return candidateRepository.findById(id);
+  },
+
+  // Advances a role's interview round by one (0 -> 1 -> 2 -> 3), keeping
+  // stage at 'INTERVIEW' throughout. Throws if the round is already at 3 —
+  // callers past that point use the offer flow instead of another round.
+  advanceInterviewRound: async (id: string, jobId: string) => {
+    const application = await appRepo().findOne({ where: { candidate: { id }, job: { id: jobId } } });
+    if (!application) throw new Error('Candidate is not linked to this role');
+    if (application.interviewRound >= 3) throw new Error('All interview rounds have already been scheduled');
+
+    await appRepo().update(application.id, {
+      stage: 'INTERVIEW',
+      stageUpdatedAt: new Date(),
+      interviewRound: application.interviewRound + 1,
+    });
+    return candidateRepository.findById(id);
+  },
+
+  addInterviewFeedback: async (
+    id: string,
+    jobId: string,
+    round: number,
+    entry: { author: string; authorRole?: string; comment: string; rating?: number }
+  ) => {
+    const application = await appRepo().findOne({ where: { candidate: { id }, job: { id: jobId } } });
+    if (!application) throw new Error('Candidate is not linked to this role');
+
+    await interviewFeedbackRepo().save(
+      interviewFeedbackRepo().create({
+        application: { id: application.id } as any,
+        round,
+        authorEmail: entry.author,
+        authorRole: entry.authorRole as any,
+        comment: entry.comment,
+        rating: entry.rating,
+      })
+    );
     return candidateRepository.findById(id);
   },
 
