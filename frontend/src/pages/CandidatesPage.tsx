@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
-import Badge, { StageBadge } from '../components/shared/Badge';
+import Badge, { StageBadge, GlobalStatusBadge, CandidateStatusBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
 import Avatar from '../components/shared/Avatar';
 import Icon from '../components/shared/Icon';
@@ -12,16 +12,20 @@ import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Ta
 import { TableSkeleton } from '../components/shared/States';
 import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
-import { Candidate } from '../types';
+import { Candidate, GlobalStatus } from '../types';
+import { humanize } from '../utils/format';
 import { useJobs } from '../hooks/useJobs';
 import { useCandidates } from '../hooks/useCandidates';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 
+const GLOBAL_STATUS_TABS: GlobalStatus[] = ['OPEN', 'SELECTED', 'ONBOARDED', 'ARCHIVED'];
+
 export default function CandidatesPage() {
   const navigate = useNavigate();
   const { id: jobIdParam } = useParams<{ id?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const toast = useToast();
@@ -32,6 +36,15 @@ export default function CandidatesPage() {
   const [email, setEmail] = useState('');
   const [currentTitle, setCurrentTitle] = useState('');
   const [jobId, setJobId] = useState(jobIdParam || '');
+
+  // Kept in the URL (not local state) so the tab survives a round trip
+  // through a candidate's detail page — the back button there returns here
+  // with `?tab=…` set, instead of always landing back on OPEN.
+  const tabParam = searchParams.get('tab') as GlobalStatus | null;
+  const activeTab: GlobalStatus = tabParam && GLOBAL_STATUS_TABS.includes(tabParam) ? tabParam : 'OPEN';
+  const setActiveTab = (tab: GlobalStatus) => {
+    setSearchParams(tab === 'OPEN' ? {} : { tab }, { replace: false });
+  };
 
   const { data: jobs, isLoading: jobsLoading } = useJobs();
   const { data: candidates, isLoading: candidatesLoading } = useCandidates();
@@ -80,9 +93,17 @@ export default function CandidatesPage() {
     return names.length ? names.join(', ') : '—';
   };
 
-  const filtered = jobIdParam
+  const byJob = jobIdParam
     ? (candidates || []).filter((c) => c.jobLinks.some((l) => l.jobId === jobIdParam))
     : candidates || [];
+
+  const tabCounts = GLOBAL_STATUS_TABS.reduce<Record<GlobalStatus, number>>((acc, tab) => {
+    acc[tab] = byJob.filter((c) => c.globalStatus === tab).length;
+    return acc;
+  }, {} as Record<GlobalStatus, number>);
+
+  const filtered = byJob.filter((c) => c.globalStatus === activeTab);
+  const showClient = isAdmin && (activeTab === 'SELECTED' || activeTab === 'ONBOARDED');
 
   return (
     <AppLayout
@@ -134,7 +155,7 @@ export default function CandidatesPage() {
               )}
             </Field>
 
-            <Field label="Current title">
+            <Field label="Current designation">
               {(id) => (
                 <Input
                   id={id}
@@ -178,16 +199,38 @@ export default function CandidatesPage() {
         </Modal>
       )}
 
+      <div className="mb-4 flex flex-wrap gap-1.5 border-b border-border">
+        {GLOBAL_STATUS_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab
+                ? 'border-brand text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {humanize(tab)}
+            <span className="rounded-full bg-muted px-1.5 text-2xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
+              {tabCounts[tab]}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {loading ? (
-        <TableSkeleton cols={isAdmin ? 5 : 4} />
+        <TableSkeleton cols={showClient ? 7 : 6} />
       ) : (
         <TableShell>
           <Thead>
             <tr>
               <Th>Name</Th>
-              {isAdmin && <Th>Client</Th>}
-              <Th>Title / Company</Th>
+              {showClient && <Th>Client</Th>}
+              <Th>Designation</Th>
+              <Th>Company</Th>
               <Th>Location</Th>
+              <Th>Status</Th>
               <Th>Roles</Th>
             </tr>
           </Thead>
@@ -205,12 +248,18 @@ export default function CandidatesPage() {
                     )}
                   </div>
                 </Td>
-                {isAdmin && <Td>{clientNames(c)}</Td>}
-                <Td>
-                  {c.currentTitle || '—'}
-                  {c.currentCompany && <span className="text-subtle-foreground"> · {c.currentCompany}</span>}
-                </Td>
+                {showClient && <Td>{clientNames(c)}</Td>}
+                <Td>{c.currentTitle || '—'}</Td>
+                <Td>{c.currentCompany || '—'}</Td>
                 <Td>{c.location || '—'}</Td>
+                <Td>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <GlobalStatusBadge status={c.globalStatus} />
+                    {c.globalStatus !== 'OPEN' && c.globalStatus !== 'SELECTED' && (
+                      <CandidateStatusBadge status={c.status} />
+                    )}
+                  </div>
+                </Td>
                 <Td>
                   {c.jobLinks.length === 0 ? (
                     <span className="text-xs text-subtle-foreground">Not linked</span>
@@ -234,8 +283,10 @@ export default function CandidatesPage() {
               </Tr>
             ))}
             {filtered.length === 0 && (
-              <EmptyRow colSpan={isAdmin ? 5 : 4}>
-                {jobIdParam ? 'No candidates linked to this role.' : 'No candidates yet.'}
+              <EmptyRow colSpan={showClient ? 7 : 6}>
+                {jobIdParam
+                  ? `No ${humanize(activeTab).toLowerCase()} candidates linked to this role.`
+                  : `No ${humanize(activeTab).toLowerCase()} candidates yet.`}
               </EmptyRow>
             )}
           </tbody>

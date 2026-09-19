@@ -9,6 +9,26 @@ export type CandidateStage =
   | 'HIRED'
   | 'REJECTED';
 
+export type GlobalStatus = 'OPEN' | 'SELECTED' | 'ONBOARDED' | 'ARCHIVED';
+
+// Valid `status` values depend on the candidate's globalStatus — see
+// STATUS_OPTIONS_BY_GLOBAL_STATUS in utils/candidateStatus.ts.
+export type OpenCandidateStatus = 'LOOKING';
+export type SelectedCandidateStatus = 'SELECTED' | 'NEGOTIATIONS' | 'OFFER_LETTER' | 'ACCEPTED';
+export type OnboardedCandidateStatus = 'COMPANY' | 'SWFS';
+export type ArchivedCandidateStatus =
+  | 'BLACKLISTED'
+  | 'OPPORTUNITY'
+  | 'OFFBOARDED'
+  | 'NOT_INTERESTED'
+  | 'CONTACTED';
+
+export type CandidateStatus =
+  | OpenCandidateStatus
+  | SelectedCandidateStatus
+  | OnboardedCandidateStatus
+  | ArchivedCandidateStatus;
+
 export type JobStatus = 'OPEN' | 'CLOSED' | 'ON_HOLD';
 
 export type JobPriority = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -100,6 +120,8 @@ export interface Candidate {
   clientRating?: number;
   feedback?: CandidateFeedback[];
   source?: 'PORTAL' | 'LINKEDIN';
+  globalStatus: GlobalStatus;
+  status: CandidateStatus;
   syncedAt: string;
 }
 

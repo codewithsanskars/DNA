@@ -2,13 +2,15 @@ import { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
-import Badge, { StageBadge } from '../components/shared/Badge';
+import Badge, { StageBadge, GlobalStatusBadge, CandidateStatusBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
 import Avatar from '../components/shared/Avatar';
 import { CenteredSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorState, EmptyState } from '../components/shared/States';
-import { Textarea, Select } from '../components/shared/Field';
+import { Field, Input, Textarea, Select } from '../components/shared/Field';
+import Modal from '../components/shared/Modal';
 import Icon from '../components/shared/Icon';
+import SelectedCandidateActions from '../components/candidates/SelectedCandidateActions';
 import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
@@ -70,6 +72,21 @@ export default function CandidateDetailPage() {
   const resumeInputRef = useRef<HTMLInputElement>(null);
   const [downloadingResume, setDownloadingResume] = useState(false);
   const [viewingResume, setViewingResume] = useState(false);
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    currentTitle: '',
+    currentCompany: '',
+    location: '',
+    skills: '',
+    linkedinUrl: '',
+    website: '',
+    notes: '',
+  });
 
   const { data: candidate, isLoading, error, refetch } = useQuery({
     queryKey: queryKeys.candidate(id!),
@@ -154,6 +171,50 @@ export default function CandidateDetailPage() {
     onError: fail('Couldn’t link this candidate'),
   });
 
+  const updateCandidate = useMutation({
+    mutationFn: () =>
+      candidateApi.updateCandidate(id!, {
+        firstName: editForm.firstName.trim(),
+        lastName: editForm.lastName.trim(),
+        email: editForm.email.trim() || undefined,
+        phone: editForm.phone.trim() || undefined,
+        currentTitle: editForm.currentTitle.trim() || undefined,
+        currentCompany: editForm.currentCompany.trim() || undefined,
+        location: editForm.location.trim() || undefined,
+        skills: editForm.skills
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        linkedinUrl: editForm.linkedinUrl.trim() || undefined,
+        website: editForm.website.trim() || undefined,
+        notes: editForm.notes.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setShowEditModal(false);
+      invalidate();
+      toast.success('Candidate updated');
+    },
+    onError: fail('Couldn’t update this candidate'),
+  });
+
+  const openEditModal = () => {
+    if (!candidate) return;
+    setEditForm({
+      firstName: candidate.firstName,
+      lastName: candidate.lastName,
+      email: candidate.email || '',
+      phone: candidate.phone || '',
+      currentTitle: candidate.currentTitle || '',
+      currentCompany: candidate.currentCompany || '',
+      location: candidate.location || '',
+      skills: candidate.skills.join(', '),
+      linkedinUrl: candidate.linkedinUrl || '',
+      website: candidate.website || '',
+      notes: candidate.notes || '',
+    });
+    setShowEditModal(true);
+  };
+
   const uploadResume = useMutation({
     mutationFn: (file: File) => candidateApi.uploadResume(id!, file),
     onSuccess: () => {
@@ -209,10 +270,6 @@ export default function CandidateDetailPage() {
     } finally {
       setViewingResume(false);
     }
-  };
-
-  const handleNoResumeDownload = () => {
-    toast.error('No résumé has been attached for this candidate yet');
   };
 
   const confirmDeleteResume = async () => {
@@ -301,6 +358,7 @@ export default function CandidateDetailPage() {
 
   const fullName = `${candidate.firstName} ${candidate.lastName}`;
   const feedbackList = candidate.feedback ?? [];
+  const isArchived = candidate.globalStatus === 'ARCHIVED';
   const linkedJobIds = new Set(candidate.jobLinks.map((l) => l.jobId));
   const availableJobs = (jobs || []).filter((j) => !linkedJobIds.has(j._id));
 
@@ -318,8 +376,7 @@ export default function CandidateDetailPage() {
   return (
     <AppLayout
       title={fullName}
-      subtitle={candidate.currentTitle || 'Candidate'}
-      backTo="/candidates"
+      backTo={`/candidates?tab=${candidate.globalStatus}`}
       backLabel="Back to candidates"
     >
       <div className="grid gap-6 lg:grid-cols-3">
@@ -328,32 +385,45 @@ export default function CandidateDetailPage() {
           <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
             <div className="flex items-start gap-4">
               <Avatar name={candidate.firstName} size="lg" />
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-semibold text-foreground">{fullName}</h2>
-                  {candidate.source === 'LINKEDIN' && (
-                    <Badge tone="info">
-                      <Icon name="linkedin" size={11} /> Sourced
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {candidate.currentTitle}
-                  {candidate.currentCompany && ` · ${candidate.currentCompany}`}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {candidate.location && (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Icon name="pin" size={13} /> {candidate.location}
-                    </span>
-                  )}
-                  {candidate.email && (
-                    <a
-                      href={`mailto:${candidate.email}`}
-                      className="inline-flex items-center gap-1.5 hover:text-foreground"
-                    >
-                      <Icon name="mail" size={13} /> {candidate.email}
-                    </a>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-semibold text-foreground">{fullName}</h2>
+                      {candidate.source === 'LINKEDIN' && (
+                        <Badge tone="info">
+                          <Icon name="linkedin" size={11} /> Sourced
+                        </Badge>
+                      )}
+                      <GlobalStatusBadge status={candidate.globalStatus} />
+                      {candidate.globalStatus !== 'OPEN' && candidate.globalStatus !== 'SELECTED' && (
+                        <CandidateStatusBadge status={candidate.status} />
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {candidate.currentTitle}
+                      {candidate.currentCompany && ` · ${candidate.currentCompany}`}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {candidate.location && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Icon name="pin" size={13} /> {candidate.location}
+                        </span>
+                      )}
+                      {candidate.email && (
+                        <a
+                          href={`mailto:${candidate.email}`}
+                          className="inline-flex items-center gap-1.5 hover:text-foreground"
+                        >
+                          <Icon name="mail" size={13} /> {candidate.email}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  {canManageResume && (
+                    <Button variant="danger" size="sm" onClick={openEditModal} className="shrink-0">
+                      Edit
+                    </Button>
                   )}
                 </div>
               </div>
@@ -377,7 +447,7 @@ export default function CandidateDetailPage() {
               </div>
             )}
 
-            {(candidate.linkedinUrl || candidate.website || candidate.resumeUrl || canAct) && (
+            {(candidate.linkedinUrl || candidate.website || candidate.resumeUrl) && (
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {candidate.linkedinUrl && (
                   <a href={candidate.linkedinUrl} target="_blank" rel="noopener noreferrer">
@@ -393,7 +463,7 @@ export default function CandidateDetailPage() {
                     </Button>
                   </a>
                 )}
-                {candidate.resumeUrl ? (
+                {candidate.resumeUrl && (
                   <>
                     <Button
                       variant="secondary"
@@ -413,56 +483,17 @@ export default function CandidateDetailPage() {
                     >
                       Download
                     </Button>
-                    {canManageResume && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon="upload"
-                          onClick={() => resumeInputRef.current?.click()}
-                          loading={uploadResume.isPending}
-                        >
-                          Replace
-                        </Button>
-                        <Button variant="ghost" size="sm" icon="trash" onClick={confirmDeleteResume}>
-                          Remove
-                        </Button>
-                      </>
-                    )}
                   </>
-                ) : canManageResume ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon="upload"
-                    onClick={() => resumeInputRef.current?.click()}
-                    loading={uploadResume.isPending}
-                  >
-                    Attach résumé
-                  </Button>
-                ) : (
-                  <Button variant="secondary" size="sm" icon="download" onClick={handleNoResumeDownload}>
-                    Download résumé
-                  </Button>
-                )}
-                {canManageResume && (
-                  <input
-                    ref={resumeInputRef}
-                    type="file"
-                    accept={RESUME_ACCEPT}
-                    className="hidden"
-                    onChange={handleResumeFile}
-                  />
                 )}
               </div>
             )}
           </div>
 
-          {/* Feedback */}
+          {/* Feedback / Comments */}
           <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-                Feedback
+                {isArchived ? 'Comments' : 'Feedback'}
                 {feedbackList.length > 0 && (
                   <span className="rounded-full bg-muted px-1.5 text-2xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                     {feedbackList.length}
@@ -471,7 +502,7 @@ export default function CandidateDetailPage() {
               </h3>
               {canAct && !showFeedback && (
                 <Button variant="ghost" size="sm" icon="plus" onClick={() => setShowFeedback(true)}>
-                  Add feedback
+                  {isArchived ? 'Add comment' : 'Add feedback'}
                 </Button>
               )}
             </div>
@@ -481,30 +512,36 @@ export default function CandidateDetailPage() {
                 <Textarea
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Share your assessment of this candidate…"
+                  placeholder={
+                    isArchived ? 'Leave a comment about this candidate…' : 'Share your assessment of this candidate…'
+                  }
                   rows={3}
                   autoFocus
                 />
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Rating</span>
-                  <div className="flex gap-0.5">
-                    {[1, 2, 3, 4, 5].map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        aria-label={`${r} star${r > 1 ? 's' : ''}`}
-                        onClick={() => setRating(r === rating ? 0 : r)}
-                        className={`transition-colors ${
-                          r <= rating ? 'text-amber-400' : 'text-border-strong hover:text-amber-400/60'
-                        }`}
-                      >
-                        <Icon name="star" size={18} className={r <= rating ? 'fill-current' : ''} />
-                      </button>
-                    ))}
+                {!isArchived && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rating</span>
+                    <div className="flex gap-0.5">
+                      {[1, 2, 3, 4, 5].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          aria-label={`${r} star${r > 1 ? 's' : ''}`}
+                          onClick={() => setRating(r === rating ? 0 : r)}
+                          className={`transition-colors ${
+                            r <= rating ? 'text-amber-400' : 'text-border-strong hover:text-amber-400/60'
+                          }`}
+                        >
+                          <Icon name="star" size={18} className={r <= rating ? 'fill-current' : ''} />
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
                 {submitFeedback.isError && (
-                  <p className="text-xs text-brand-text">Couldn’t submit feedback. Please try again.</p>
+                  <p className="text-xs text-brand-text">
+                    Couldn’t submit {isArchived ? 'comment' : 'feedback'}. Please try again.
+                  </p>
                 )}
                 <div className="flex gap-2">
                   <Button
@@ -514,7 +551,11 @@ export default function CandidateDetailPage() {
                     disabled={!feedback.trim()}
                     loading={submitFeedback.isPending}
                   >
-                    {submitFeedback.isPending ? 'Submitting…' : 'Submit feedback'}
+                    {submitFeedback.isPending
+                      ? 'Submitting…'
+                      : isArchived
+                        ? 'Submit comment'
+                        : 'Submit feedback'}
                   </Button>
                   <Button
                     variant="ghost"
@@ -546,7 +587,7 @@ export default function CandidateDetailPage() {
                           </p>
                         </div>
                       </div>
-                      {f.rating ? <Stars value={f.rating} /> : null}
+                      {!isArchived && f.rating ? <Stars value={f.rating} /> : null}
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
                       {f.comment}
@@ -558,8 +599,12 @@ export default function CandidateDetailPage() {
               !showFeedback && (
                 <p className="mt-3 text-[13px] text-muted-foreground">
                   {canAct
-                    ? 'No feedback yet — add the first note.'
-                    : 'No feedback has been shared for this candidate yet.'}
+                    ? isArchived
+                      ? 'No comments yet'
+                      : 'No feedback yet'
+                    : isArchived
+                      ? 'No comments have been shared for this candidate yet.'
+                      : 'No feedback has been shared for this candidate yet.'}
                 </p>
               )
             )}
@@ -684,11 +729,21 @@ export default function CandidateDetailPage() {
         </div>
 
         {/* Linked positions */}
+        {!isArchived && (
         <div className="space-y-6">
+          {canManageResume && candidate.globalStatus === 'SELECTED' && (
+            <SelectedCandidateActions candidateId={candidate._id} candidateName={fullName} />
+          )}
           <div>
-            <SectionTitle count={candidate.jobLinks.length}>Linked roles</SectionTitle>
+            <SectionTitle count={candidate.globalStatus === 'SELECTED' ? undefined : candidate.jobLinks.length}>
+              {candidate.globalStatus === 'SELECTED' ? 'Position selected for' : 'Linked roles'}
+            </SectionTitle>
 
-            {candidate.jobLinks.length === 0 ? (
+            {candidate.globalStatus === 'SELECTED' ? (
+              <div className="rounded-lg border border-dashed border-border bg-card">
+                <EmptyState icon="briefcase" title="No position yet" className="py-10" />
+              </div>
+            ) : candidate.jobLinks.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border bg-card">
                 <EmptyState
                   icon="briefcase"
@@ -755,7 +810,7 @@ export default function CandidateDetailPage() {
             )}
           </div>
 
-          {canAct && availableJobs.length > 0 && (
+          {canAct && candidate.globalStatus !== 'SELECTED' && availableJobs.length > 0 && (
             <div className="rounded-lg border border-border bg-card p-4 shadow-xs">
               <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
                 Link to another role
@@ -786,7 +841,237 @@ export default function CandidateDetailPage() {
             </div>
           )}
         </div>
+        )}
+
+        {/* Archived candidates get Actions/History in place of the pipeline panel */}
+        {isArchived && (
+          <div className="space-y-6">
+            <div>
+              <SectionTitle>Actions</SectionTitle>
+              <div className="rounded-lg border border-dashed border-border bg-card">
+                <EmptyState
+                  icon="settings"
+                  title="No actions yet"
+                  description="Actions for archived candidates will show up here."
+                  className="py-10"
+                />
+              </div>
+            </div>
+
+            <div>
+              <SectionTitle>History</SectionTitle>
+              <div className="rounded-lg border border-dashed border-border bg-card">
+                <EmptyState
+                  icon="activity"
+                  title="No history yet"
+                  description="This candidate's history will show up here."
+                  className="py-10"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {showEditModal && (
+        <Modal
+          title="Edit candidate"
+          description="Update this candidate's details."
+          onClose={() => setShowEditModal(false)}
+          size="full"
+          centered
+        >
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="First name" required>
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.firstName}
+                    onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+                    required
+                  />
+                )}
+              </Field>
+              <Field label="Last name" required>
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.lastName}
+                    onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
+                    required
+                  />
+                )}
+              </Field>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Email">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  />
+                )}
+              </Field>
+              <Field label="Phone">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                  />
+                )}
+              </Field>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Current designation">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.currentTitle}
+                    onChange={(e) => setEditForm({ ...editForm, currentTitle: e.target.value })}
+                  />
+                )}
+              </Field>
+              <Field label="Current company">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.currentCompany}
+                    onChange={(e) => setEditForm({ ...editForm, currentCompany: e.target.value })}
+                  />
+                )}
+              </Field>
+            </div>
+
+            <Field label="Location">
+              {(fid) => (
+                <Input
+                  id={fid}
+                  value={editForm.location}
+                  onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
+                />
+              )}
+            </Field>
+
+            <Field label="Skills" hint="comma-separated">
+              {(fid) => (
+                <Input
+                  id={fid}
+                  value={editForm.skills}
+                  onChange={(e) => setEditForm({ ...editForm, skills: e.target.value })}
+                  placeholder="e.g. React, Node.js, SQL"
+                />
+              )}
+            </Field>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="LinkedIn URL">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.linkedinUrl}
+                    onChange={(e) => setEditForm({ ...editForm, linkedinUrl: e.target.value })}
+                    placeholder="https://linkedin.com/in/…"
+                  />
+                )}
+              </Field>
+              <Field label="Website">
+                {(fid) => (
+                  <Input
+                    id={fid}
+                    value={editForm.website}
+                    onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
+                    placeholder="https://…"
+                  />
+                )}
+              </Field>
+            </div>
+
+            <Field label="Notes">
+              {(fid) => (
+                <Textarea
+                  id={fid}
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  rows={3}
+                />
+              )}
+            </Field>
+
+            <div className="border-t border-border pt-4">
+              <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
+                Résumé
+              </p>
+              {candidate.resumeUrl ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="external"
+                    onClick={handleViewResume}
+                    loading={viewingResume}
+                  >
+                    {candidate.resumeFileName || 'Résumé'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="upload"
+                    onClick={() => resumeInputRef.current?.click()}
+                    loading={uploadResume.isPending}
+                  >
+                    Replace
+                  </Button>
+                  <Button variant="ghost" size="sm" icon="trash" onClick={confirmDeleteResume}>
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="upload"
+                  onClick={() => resumeInputRef.current?.click()}
+                  loading={uploadResume.isPending}
+                >
+                  Attach résumé
+                </Button>
+              )}
+              <input
+                ref={resumeInputRef}
+                type="file"
+                accept={RESUME_ACCEPT}
+                className="hidden"
+                onChange={handleResumeFile}
+              />
+            </div>
+
+            {updateCandidate.isError && (
+              <p className="text-xs text-brand-text">Couldn’t update this candidate. Please try again.</p>
+            )}
+
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button type="button" variant="ghost" onClick={() => setShowEditModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => updateCandidate.mutate()}
+                disabled={!editForm.firstName.trim() || !editForm.lastName.trim()}
+                loading={updateCandidate.isPending}
+              >
+                {updateCandidate.isPending ? 'Saving…' : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </AppLayout>
   );
 }

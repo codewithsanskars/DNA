@@ -1,5 +1,5 @@
 import api from './axios';
-import { ApiResponse, Candidate } from '../types';
+import { ApiResponse, Candidate, GlobalStatus, CandidateStatus } from '../types';
 
 export const candidateApi = {
   getCandidates: async (): Promise<Candidate[]> => {
@@ -69,8 +69,40 @@ export const candidateApi = {
     return res.data.data!;
   },
 
+  updateGlobalStatus: async (
+    id: string,
+    globalStatus: GlobalStatus,
+    status: CandidateStatus
+  ): Promise<Candidate> => {
+    const res = await api.patch<ApiResponse<Candidate>>(`/candidates/${id}/global-status`, {
+      globalStatus,
+      status,
+    });
+    return res.data.data!;
+  },
+
   linkToJob: async (id: string, jobId: string): Promise<Candidate> => {
     const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/link-job`, { jobId });
+    return res.data.data!;
+  },
+
+  updateCandidate: async (
+    id: string,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      currentTitle?: string;
+      currentCompany?: string;
+      location?: string;
+      skills?: string[];
+      linkedinUrl?: string;
+      website?: string;
+      notes?: string;
+    }
+  ): Promise<Candidate> => {
+    const res = await api.patch<ApiResponse<Candidate>>(`/candidates/${id}`, data);
     return res.data.data!;
   },
 

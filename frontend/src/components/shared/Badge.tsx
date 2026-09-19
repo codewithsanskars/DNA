@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { CandidateStage, JobStatus, JobPriority } from '../../types';
+import { CandidateStage, GlobalStatus, CandidateStatus, JobStatus, JobPriority } from '../../types';
 import { humanize } from '../../utils/format';
 
 export type BadgeTone = 'neutral' | 'brand' | 'success' | 'warning' | 'info' | 'purple' | 'danger';
@@ -55,6 +55,13 @@ const STATUS_TONES: Record<JobStatus, BadgeTone> = {
   ON_HOLD: 'warning',
 };
 
+const GLOBAL_STATUS_TONES: Record<GlobalStatus, BadgeTone> = {
+  OPEN: 'info',
+  SELECTED: 'success',
+  ONBOARDED: 'brand',
+  ARCHIVED: 'neutral',
+};
+
 // High → urgent (red), medium → warm (amber), low → calm (blue) — a
 // standard urgency ramp, kept distinct from STATUS_TONES' 'success' so a
 // low-priority role never reads as "the same green as OPEN/HIRED."
@@ -78,6 +85,18 @@ export function StatusBadge({ status }: { status: JobStatus }) {
       {humanize(status)}
     </Badge>
   );
+}
+
+export function GlobalStatusBadge({ status }: { status: GlobalStatus }) {
+  return (
+    <Badge tone={GLOBAL_STATUS_TONES[status]} dot>
+      {humanize(status)}
+    </Badge>
+  );
+}
+
+export function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
+  return <Badge tone="neutral">{humanize(status)}</Badge>;
 }
 
 export function PriorityBadge({ priority }: { priority: JobPriority }) {

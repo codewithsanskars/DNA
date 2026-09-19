@@ -2,6 +2,8 @@ import {
   UserRole,
   CandidateStage,
   CandidateSource,
+  GlobalStatus,
+  CandidateStatus,
   JobStatus,
   JobPriority,
   WorkType,
@@ -25,6 +27,20 @@ export const CANDIDATE_STAGES: CandidateStage[] = [
 ];
 
 export const CANDIDATE_SOURCES: CandidateSource[] = ['PORTAL', 'LINKEDIN'];
+
+export const GLOBAL_STATUSES: GlobalStatus[] = ['OPEN', 'SELECTED', 'ONBOARDED', 'ARCHIVED'];
+
+// The candidate's `status` options, scoped to their current `globalStatus`.
+// The first entry in each list is the default a candidate falls back to
+// when their globalStatus changes without an explicit status being chosen.
+export const STATUS_OPTIONS_BY_GLOBAL_STATUS: Record<GlobalStatus, CandidateStatus[]> = {
+  OPEN: ['LOOKING'],
+  SELECTED: ['SELECTED'],
+  ONBOARDED: ['COMPANY', 'SWFS'],
+  ARCHIVED: ['BLACKLISTED', 'OPPORTUNITY', 'OFFBOARDED', 'NOT_INTERESTED', 'CONTACTED'],
+};
+
+export const CANDIDATE_STATUSES: CandidateStatus[] = Object.values(STATUS_OPTIONS_BY_GLOBAL_STATUS).flat();
 
 export const JOB_STATUSES: JobStatus[] = ['OPEN', 'CLOSED', 'ON_HOLD'];
 

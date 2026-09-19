@@ -344,7 +344,7 @@ export default function SearchPage() {
                 </Field>
               </div>
 
-              <Field label="Current title">
+              <Field label="Current designation">
                 {(id) => (
                   <Input
                     id={id}

@@ -10,6 +10,9 @@ const NAV: { to: string; label: string; icon: IconName; adminOnly?: boolean }[] 
   { to: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { to: '/jobs', label: 'Open Roles', icon: 'briefcase' },
   { to: '/candidates', label: 'Candidates', icon: 'users' },
+  // A consolidated pool of reachable candidates (Open + re-engageable
+  // Archived) — SWFS-staff workflow, no reason for a client org to see it.
+  { to: '/master-database', label: 'Master Database', icon: 'inbox', adminOnly: true },
   // LinkedIn sourcing is an SWFS-staff workflow; a client org has no reason
   // to see it, so this tab doesn't exist for them at all.
   { to: '/search', label: 'Search', icon: 'search', adminOnly: true },

@@ -2,7 +2,7 @@ import { In, DeepPartial } from 'typeorm';
 import { AppDataSource } from '../config/data-source';
 import { Candidate, Application, CandidateFeedback, InterviewFeedback } from '../entities';
 import { CANDIDATE_STAGES } from '../entities/enums';
-import { CandidateStage } from '../types';
+import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
 
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
@@ -36,6 +36,8 @@ function toDto(c: Candidate) {
     notes: c.notes,
     clientRating: c.clientRating,
     source: c.source,
+    globalStatus: c.globalStatus,
+    status: c.status,
     syncedAt: c.updatedAt,
     jobLinks: (c.applications || []).map((a) => ({
       jobId: a.job.id,
@@ -222,8 +224,23 @@ export const candidateRepository = {
     return candidateRepository.findById(id);
   },
 
+  updateDetails: async (id: string, data: Partial<Candidate>) => {
+    await repo().update(id, data);
+    return candidateRepository.findById(id);
+  },
+
   updateRating: async (id: string, clientRating: number) => {
     await repo().update(id, { clientRating });
+    return candidateRepository.findById(id);
+  },
+
+  updateGlobalStatus: async (id: string, globalStatus: GlobalStatus, status: CandidateStatus) => {
+    await repo().update(id, { globalStatus, status });
+    return candidateRepository.findById(id);
+  },
+
+  updateStatus: async (id: string, status: CandidateStatus) => {
+    await repo().update(id, { status });
     return candidateRepository.findById(id);
   },
 

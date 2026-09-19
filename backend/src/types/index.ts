@@ -13,6 +13,26 @@ export type CandidateStage =
 
 export type CandidateSource = 'PORTAL' | 'LINKEDIN';
 
+export type GlobalStatus = 'OPEN' | 'SELECTED' | 'ONBOARDED' | 'ARCHIVED';
+
+// The valid `status` values for a candidate depend on their `globalStatus` —
+// each group below is only ever paired with its own globalStatus.
+export type OpenCandidateStatus = 'LOOKING';
+export type SelectedCandidateStatus = 'SELECTED' | 'NEGOTIATIONS' | 'OFFER_LETTER' | 'ACCEPTED';
+export type OnboardedCandidateStatus = 'COMPANY' | 'SWFS';
+export type ArchivedCandidateStatus =
+  | 'BLACKLISTED'
+  | 'OPPORTUNITY'
+  | 'OFFBOARDED'
+  | 'NOT_INTERESTED'
+  | 'CONTACTED';
+
+export type CandidateStatus =
+  | OpenCandidateStatus
+  | SelectedCandidateStatus
+  | OnboardedCandidateStatus
+  | ArchivedCandidateStatus;
+
 export type JobStatus = 'OPEN' | 'CLOSED' | 'ON_HOLD';
 
 export type JobPriority = 'LOW' | 'MEDIUM' | 'HIGH';

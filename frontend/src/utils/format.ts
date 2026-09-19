@@ -3,12 +3,19 @@
  * safe to use from components, hooks, or other utils without cycle risk.
  */
 
+/** Words kept fully uppercase by `humanize` instead of being title-cased. */
+const HUMANIZE_ACRONYMS = new Set(['SWFS']);
+
 /** `SHORTLISTED` / `request_interview` -> `Shortlisted` / `Request Interview`. */
 export function humanize(value: string): string {
   return value
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/(^|\s)\w/g, (c) => c.toUpperCase());
+    .split('_')
+    .map((word) =>
+      HUMANIZE_ACRONYMS.has(word.toUpperCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+    .join(' ');
 }
 
 /** Locale date, no time: `10/1/2024`. */

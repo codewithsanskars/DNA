@@ -7,8 +7,8 @@ import {
   Index,
   OneToMany,
 } from 'typeorm';
-import { CandidateSource } from '../types';
-import { CANDIDATE_SOURCES } from './enums';
+import { CandidateSource, GlobalStatus, CandidateStatus } from '../types';
+import { CANDIDATE_SOURCES, GLOBAL_STATUSES } from './enums';
 import { Application } from './Application';
 import { CandidateFeedback } from './CandidateFeedback';
 
@@ -68,6 +68,17 @@ export class Candidate {
 
   @Column({ type: 'enum', enum: CANDIDATE_SOURCES, default: 'PORTAL' })
   source!: CandidateSource;
+
+  // Overall pipeline status for this candidate, independent of the per-role
+  // stage tracked on each Application — surfaced as the Candidates tab filter.
+  @Column({ type: 'enum', enum: GLOBAL_STATUSES, default: 'OPEN' })
+  globalStatus!: GlobalStatus;
+
+  // Sub-status within the current globalStatus — its valid values depend on
+  // globalStatus (see STATUS_OPTIONS_BY_GLOBAL_STATUS), so this is a plain
+  // varchar rather than a DB enum; the service layer enforces the pairing.
+  @Column({ type: 'varchar', default: 'LOOKING' })
+  status!: CandidateStatus;
 
   @OneToMany(() => Application, (application) => application.candidate)
   applications!: Application[];

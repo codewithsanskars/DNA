@@ -1,6 +1,7 @@
 import { candidateRepository } from '../repositories/candidate.repository';
 import { jobRepository } from '../repositories/job.repository';
-import { CandidateStage } from '../types';
+import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
+import { GLOBAL_STATUSES, STATUS_OPTIONS_BY_GLOBAL_STATUS } from '../entities/enums';
 
 export const candidateService = {
   // SWFS admin/recruiter view: every candidate across every client.
@@ -134,6 +135,75 @@ export const candidateService = {
       source: data.source ?? 'PORTAL',
       rawData: {},
     });
+  },
+
+  // `status` is optional: if the caller doesn't pick one for the new
+  // globalStatus, the group's default (first option) is used so the
+  // candidate never ends up with a status/globalStatus combo that's invalid.
+  // Editable candidate detail fields — deliberately excludes globalStatus and
+  // status, which have their own dedicated endpoints/flows.
+  updateCandidate: async (
+    candidateId: string,
+    organizationId: string | null,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      currentTitle?: string;
+      currentCompany?: string;
+      location?: string;
+      skills?: string[];
+      linkedinUrl?: string;
+      website?: string;
+      notes?: string;
+    }
+  ) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    if (data.firstName !== undefined && !data.firstName.trim()) {
+      throw new Error('firstName cannot be empty');
+    }
+    if (data.lastName !== undefined && !data.lastName.trim()) {
+      throw new Error('lastName cannot be empty');
+    }
+    return candidateRepository.updateDetails(candidateId, data);
+  },
+
+  updateGlobalStatus: async (
+    candidateId: string,
+    organizationId: string | null,
+    globalStatus: string,
+    status?: string
+  ) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    if (!GLOBAL_STATUSES.includes(globalStatus as GlobalStatus)) {
+      throw new Error('Invalid global status');
+    }
+    const allowedStatuses = STATUS_OPTIONS_BY_GLOBAL_STATUS[globalStatus as GlobalStatus];
+    let nextStatus: CandidateStatus;
+    if (status) {
+      if (!allowedStatuses.includes(status as CandidateStatus)) {
+        throw new Error('Invalid status for this global status');
+      }
+      nextStatus = status as CandidateStatus;
+    } else {
+      nextStatus = allowedStatuses[0];
+    }
+    return candidateRepository.updateGlobalStatus(candidateId, globalStatus as GlobalStatus, nextStatus);
+  },
+
+  // Changes just the sub-status, independent of globalStatus — must be one
+  // of the options for the candidate's *current* globalStatus.
+  updateStatus: async (candidateId: string, organizationId: string | null, status: string) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    const allowedStatuses = STATUS_OPTIONS_BY_GLOBAL_STATUS[candidate.globalStatus as GlobalStatus];
+    if (!allowedStatuses.includes(status as CandidateStatus)) {
+      throw new Error('Invalid status for this candidate’s global status');
+    }
+    return candidateRepository.updateStatus(candidateId, status as CandidateStatus);
   },
 
   linkToJob: async (candidateId: string, organizationId: string | null, jobId: string) => {

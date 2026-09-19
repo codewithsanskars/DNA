@@ -11,6 +11,7 @@ import JobsPage from './pages/JobsPage';
 import SearchPage from './pages/SearchPage';
 import CandidatesPage from './pages/CandidatesPage';
 import CandidateDetailPage from './pages/CandidateDetailPage';
+import MasterDatabasePage from './pages/MasterDatabasePage';
 import OrganizationPage from './pages/OrganizationPage';
 import OrganizationDetailPage from './pages/OrganizationDetailPage';
 import ActivityPage from './pages/ActivityPage';
@@ -82,6 +83,7 @@ function AppRoutes() {
         <Route path="/jobs/:id" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates/:id" element={<PrivateRoute><CandidateDetailPage /></PrivateRoute>} />
+        <Route path="/master-database" element={<AdminRoute><MasterDatabasePage /></AdminRoute>} />
         <Route path="/organization" element={<AdminRoute><OrganizationPage /></AdminRoute>} />
         <Route path="/organization/:id" element={<AdminRoute><OrganizationDetailPage /></AdminRoute>} />
         <Route path="/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />

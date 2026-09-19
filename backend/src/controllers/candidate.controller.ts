@@ -33,6 +33,42 @@ export const candidateController = {
     }
   },
 
+  updateCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const {
+        firstName,
+        lastName,
+        email,
+        phone,
+        currentTitle,
+        currentCompany,
+        location,
+        skills,
+        linkedinUrl,
+        website,
+        notes,
+      } = req.body;
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.updateCandidate(req.params.id, orgScope, {
+        firstName,
+        lastName,
+        email,
+        phone,
+        currentTitle,
+        currentCompany,
+        location,
+        skills,
+        linkedinUrl,
+        website,
+        notes,
+      });
+      await auditLogService.log(req.user!, 'UPDATE_CANDIDATE', 'candidate', req.params.id, req.body);
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   shortlist: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { jobId } = req.body;
@@ -164,6 +200,41 @@ export const candidateController = {
       });
       await auditLogService.log(req.user!, 'CREATE_CANDIDATE', 'candidate', candidate._id, { jobId, email, source: candidateSource });
       res.status(201).json({ success: true, data: candidate });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  updateGlobalStatus: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { globalStatus, status } = req.body;
+      if (!globalStatus) {
+        res.status(400).json({ success: false, error: 'globalStatus is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.updateGlobalStatus(req.params.id, orgScope, globalStatus, status);
+      await auditLogService.log(req.user!, 'UPDATE_GLOBAL_STATUS', 'candidate', req.params.id, {
+        globalStatus,
+        status,
+      });
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  updateStatus: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { status } = req.body;
+      if (!status) {
+        res.status(400).json({ success: false, error: 'status is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.updateStatus(req.params.id, orgScope, status);
+      await auditLogService.log(req.user!, 'UPDATE_STATUS', 'candidate', req.params.id, { status });
+      res.json({ success: true, data: updated });
     } catch (err) {
       next(err);
     }
