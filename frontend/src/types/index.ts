@@ -58,10 +58,22 @@ export interface JobLink {
   stage: CandidateStage;
   organizationId?: string;
   organizationName?: string;
+  interviewRound: number;
+  interviewFeedback: InterviewRoundFeedback[];
 }
 
 export interface CandidateFeedback {
   id: string;
+  author: string;
+  authorRole?: string;
+  comment: string;
+  rating?: number;
+  createdAt: string;
+}
+
+export interface InterviewRoundFeedback {
+  id: string;
+  round: number;
   author: string;
   authorRole?: string;
   comment: string;

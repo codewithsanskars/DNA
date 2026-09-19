@@ -33,6 +33,10 @@ const parseHoursPerDay = (value?: string): string => value?.match(/[\d.]+/)?.[0]
 const formatHoursPerDay = (value: string): string | undefined =>
   value.trim() ? `${value.trim()} hrs/day` : undefined;
 
+// IN_HOUSE reads differently depending on who's looking: from SWFS's side
+// the client runs their own payroll; from the client's side it's their own.
+const inHousePayrollLabel = (isAdmin: boolean) => (isAdmin ? 'Client Payroll' : 'Own Payroll');
+
 export default function JobsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -378,8 +382,8 @@ export default function JobsPage() {
                     value={payrollType}
                     onChange={(e) => setPayrollType(e.target.value as PayrollType)}
                   >
-                    <option value="THIRD_PARTY">Third Party</option>
-                    <option value="IN_HOUSE">Own Payroll</option>
+                    <option value="THIRD_PARTY">SWFS</option>
+                    <option value="IN_HOUSE">{inHousePayrollLabel(isAdmin)}</option>
                   </Select>
                 )}
               </Field>

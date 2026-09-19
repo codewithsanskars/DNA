@@ -45,7 +45,7 @@ export const candidateService = {
   requestInterview: async (candidateId: string, jobId: string, organizationId: string | null, _requestData: any) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
     if (!candidate) throw new Error('Candidate not found');
-    return candidateRepository.updateStageForJob(candidateId, jobId, 'INTERVIEW');
+    return candidateRepository.advanceInterviewRound(candidateId, jobId);
   },
 
   submitFeedback: async (
@@ -67,6 +67,26 @@ export const candidateService = {
     if (rating) await candidateRepository.updateRating(candidateId, rating);
 
     return candidateRepository.findById(candidateId);
+  },
+
+  submitInterviewFeedback: async (
+    candidateId: string,
+    jobId: string,
+    round: number,
+    organizationId: string | null,
+    feedback: string,
+    rating?: number,
+    author?: { email: string; role: string }
+  ) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+
+    return candidateRepository.addInterviewFeedback(candidateId, jobId, round, {
+      author: author?.email ?? 'unknown',
+      authorRole: author?.role,
+      comment: feedback,
+      rating: rating || undefined,
+    });
   },
 
   // organizationId === null aggregates the pipeline summary across every client.
