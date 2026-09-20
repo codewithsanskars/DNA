@@ -21,6 +21,7 @@ interface AuthContextValue {
   pendingOktaRegistration: PendingOktaRegistration | null;
   completeOktaRegistration: (organizationName: string) => Promise<void>;
   cancelOktaRegistration: () => void;
+  updateProfile: (data: { name: string; email: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -107,6 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const cancelOktaRegistration = () => setPendingOktaRegistration(null);
 
+  const updateProfile = async (data: { name: string; email: string }) => {
+    const updated = await authApi.updateProfile(data);
+    setUser(updated);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -120,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         pendingOktaRegistration,
         completeOktaRegistration,
         cancelOktaRegistration,
+        updateProfile,
       }}
     >
       {children}

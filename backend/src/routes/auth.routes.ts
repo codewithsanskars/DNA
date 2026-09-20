@@ -10,5 +10,6 @@ router.get('/okta/login', authController.oktaLogin);
 router.get('/okta/callback', authController.oktaCallback);
 router.post('/okta/register', authController.completeOktaRegistration);
 router.get('/me', authenticate, authController.me);
+router.patch('/me', authenticate, authController.updateMe);
 
 export default router;
