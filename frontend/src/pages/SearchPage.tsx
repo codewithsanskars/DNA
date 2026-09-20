@@ -13,6 +13,7 @@ import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
 import { useCandidates } from '../hooks/useCandidates';
 import { useToast } from '../components/shared/Toast';
+import { isValidOptionalEmail } from '../utils/validation';
 
 const LINKEDIN_PEOPLE_SEARCH = 'https://www.linkedin.com/search/results/people/?keywords=';
 const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -136,7 +137,12 @@ export default function SearchPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (canSubmit) addCandidate.mutate();
+    if (!canSubmit) return;
+    if (!isValidOptionalEmail(form.email)) {
+      toast.error('Invalid email', 'Enter a valid email address.');
+      return;
+    }
+    addCandidate.mutate();
   };
 
   // --- Quick-add button ---------------------------------------------

@@ -108,7 +108,9 @@ export const candidateService = {
       skills?: string[];
       linkedinUrl?: string;
       website?: string;
+      notes?: string;
       source?: 'PORTAL' | 'LINKEDIN';
+      noticePeriod?: number;
     }
   ) => {
     let jobLinks: { jobId: string; jobTitle: string; stage: CandidateStage }[] = [];
@@ -132,7 +134,9 @@ export const candidateService = {
       skills: data.skills || [],
       linkedinUrl: data.linkedinUrl,
       website: data.website,
+      notes: data.notes,
       source: data.source ?? 'PORTAL',
+      noticePeriod: data.noticePeriod,
       rawData: {},
     });
   },
@@ -157,6 +161,7 @@ export const candidateService = {
       linkedinUrl?: string;
       website?: string;
       notes?: string;
+      noticePeriod?: number;
     }
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
@@ -166,6 +171,11 @@ export const candidateService = {
     }
     if (data.lastName !== undefined && !data.lastName.trim()) {
       throw new Error('lastName cannot be empty');
+    }
+    if (data.noticePeriod !== undefined && data.noticePeriod !== null) {
+      if (!Number.isInteger(data.noticePeriod) || data.noticePeriod < 0) {
+        throw new Error('noticePeriod must be a whole number of days, 0 or more');
+      }
     }
     return candidateRepository.updateDetails(candidateId, data);
   },

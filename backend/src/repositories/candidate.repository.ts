@@ -35,6 +35,7 @@ function toDto(c: Candidate) {
     website: c.website,
     notes: c.notes,
     clientRating: c.clientRating,
+    noticePeriod: c.noticePeriod,
     source: c.source,
     globalStatus: c.globalStatus,
     status: c.status,

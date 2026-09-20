@@ -34,7 +34,6 @@ export default function MasterDatabasePage() {
   return (
     <AppLayout
       title="Master Database"
-      subtitle="Every open candidate, plus archived candidates still worth re-engaging."
     >
       {isLoading ? (
         <TableSkeleton cols={7} />

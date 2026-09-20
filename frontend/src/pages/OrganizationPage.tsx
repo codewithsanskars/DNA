@@ -17,6 +17,7 @@ import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 import { OrganizationSocialLinks } from '../types';
 import { errorMessage } from '../utils/errors';
+import { isValidOptionalEmail } from '../utils/validation';
 
 const EMPTY_FORM = {
   name: '',
@@ -115,6 +116,10 @@ export default function OrganizationPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
+    if (!isValidOptionalEmail(form.email)) {
+      toast.error('Invalid email', 'Enter a valid email address.');
+      return;
+    }
     createOrg.mutate();
   };
 

@@ -7,6 +7,35 @@ import { auditLogService } from '../services/auditLog.service';
 import { isAdminRole } from '../utils/roles';
 import { RESUME_DIR } from '../middleware/upload.middleware';
 
+function badRequest(message: string): Error & { statusCode: number } {
+  return Object.assign(new Error(message), { statusCode: 400 });
+}
+
+// Same pattern the browser's own `type="email"` validation uses (the
+// WHATWG HTML spec's email regex) — the frontend enforces this too, but a
+// request can always bypass that, so it's re-checked here.
+const EMAIL_RE =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function assertValidEmail(value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  if (!EMAIL_RE.test(String(value).trim())) {
+    throw badRequest('Email must be a valid email address');
+  }
+}
+
+// Notice period is always whole days — anything else (fractional, negative,
+// non-numeric) would otherwise reach the `int` column and either fail
+// silently (truncated) or throw an opaque 500.
+function parseNoticePeriod(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0) {
+    throw badRequest('Notice period must be a whole number of days, 0 or more');
+  }
+  return num;
+}
+
 export const candidateController = {
   getCandidates: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
@@ -47,7 +76,9 @@ export const candidateController = {
         linkedinUrl,
         website,
         notes,
+        noticePeriod,
       } = req.body;
+      assertValidEmail(email);
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
       const updated = await candidateService.updateCandidate(req.params.id, orgScope, {
         firstName,
@@ -61,6 +92,7 @@ export const candidateController = {
         linkedinUrl,
         website,
         notes,
+        noticePeriod: parseNoticePeriod(noticePeriod),
       });
       await auditLogService.log(req.user!, 'UPDATE_CANDIDATE', 'candidate', req.params.id, req.body);
       res.json({ success: true, data: updated });
@@ -178,11 +210,12 @@ export const candidateController = {
 
   createCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { jobId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, source } = req.body;
+      const { jobId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, notes, source, noticePeriod } = req.body;
       if (!firstName || !lastName) {
         res.status(400).json({ success: false, error: 'firstName and lastName are required' });
         return;
       }
+      assertValidEmail(email);
       const candidateSource = ['PORTAL', 'LINKEDIN'].includes(source) ? source : 'PORTAL';
 
       const candidate = await candidateService.createCandidate(jobId || undefined, {
@@ -196,7 +229,9 @@ export const candidateController = {
         skills,
         linkedinUrl,
         website,
+        notes,
         source: candidateSource,
+        noticePeriod: parseNoticePeriod(noticePeriod),
       });
       await auditLogService.log(req.user!, 'CREATE_CANDIDATE', 'candidate', candidate._id, { jobId, email, source: candidateSource });
       res.status(201).json({ success: true, data: candidate });

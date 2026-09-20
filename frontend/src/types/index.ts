@@ -118,6 +118,8 @@ export interface Candidate {
   website?: string;
   notes?: string;
   clientRating?: number;
+  /** Days of notice the candidate must give their current employer. */
+  noticePeriod?: number;
   feedback?: CandidateFeedback[];
   source?: 'PORTAL' | 'LINKEDIN';
   globalStatus: GlobalStatus;

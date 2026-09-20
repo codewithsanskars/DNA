@@ -47,6 +47,18 @@ function parseRate(value: unknown, label: string): number | undefined {
   return num;
 }
 
+// billableHours is stored as a free-text string like "8 hrs/day", but the
+// number in it still has to represent a real portion of a day: more than
+// zero, no more than 24, and in half-hour increments (how it's billed).
+function assertValidBillableHours(value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  const match = String(value).match(/[\d.]+/);
+  const num = match ? Number(match[0]) : NaN;
+  if (!Number.isFinite(num)) throw badRequest('Billable hours must be a number');
+  if (num <= 0 || num > 24) throw badRequest('Billable hours must be greater than 0 and no more than 24');
+  if (Math.round(num * 2) !== num * 2) throw badRequest('Billable hours must be in increments of 0.5');
+}
+
 // Rejects a value that isn't one of the entity's known enum members — an
 // out-of-range value would otherwise reach Postgres and throw an "invalid
 // input value for enum ..." error, surfaced as an opaque 500.
@@ -109,6 +121,7 @@ export const jobController = {
       assertEnumValue(priority, JOB_PRIORITIES, 'Priority');
       assertEnumValue(workType, WORK_TYPES, 'Type of work');
       assertEnumValue(payrollType, PAYROLL_TYPES, 'Payroll');
+      assertValidBillableHours(billableHours);
       const isAdmin = isAdminRole(req.user!.role);
 
       // Only SWFS admin/recruiter may assign a job to a client other than their own org.
@@ -152,6 +165,7 @@ export const jobController = {
       assertEnumValue(priority, JOB_PRIORITIES, 'Priority');
       assertEnumValue(workType, WORK_TYPES, 'Type of work');
       assertEnumValue(payrollType, PAYROLL_TYPES, 'Payroll');
+      assertValidBillableHours(billableHours);
       const isAdmin = isAdminRole(req.user!.role);
       const orgScope = isAdmin ? null : req.user!.organizationId;
       const job = await jobService.updateJob(req.params.id, orgScope, {

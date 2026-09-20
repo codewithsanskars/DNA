@@ -66,6 +66,10 @@ export class Candidate {
   @Column({ type: 'int', nullable: true })
   clientRating?: number;
 
+  // How many days' notice the candidate must give their current employer.
+  @Column({ type: 'int', nullable: true })
+  noticePeriod?: number;
+
   @Column({ type: 'enum', enum: CANDIDATE_SOURCES, default: 'PORTAL' })
   source!: CandidateSource;
 

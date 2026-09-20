@@ -3,6 +3,18 @@ import { AuthenticatedRequest } from '../types';
 import { organizationService } from '../services/organization.service';
 import { auditLogService } from '../services/auditLog.service';
 
+// Same pattern the browser's own `type="email"` validation uses (the
+// WHATWG HTML spec's email regex).
+const EMAIL_RE =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function assertValidEmail(value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  if (!EMAIL_RE.test(String(value).trim())) {
+    throw Object.assign(new Error('Email must be a valid email address'), { statusCode: 400 });
+  }
+}
+
 export const organizationController = {
   getProfile: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
@@ -74,6 +86,7 @@ export const organizationController = {
         res.status(400).json({ success: false, error: 'Company name is required' });
         return;
       }
+      assertValidEmail(email);
 
       const org = await organizationService.createOrganization({
         name: name.trim(),

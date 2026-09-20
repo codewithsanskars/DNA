@@ -63,7 +63,9 @@ export const candidateApi = {
     skills?: string[];
     linkedinUrl?: string;
     website?: string;
+    notes?: string;
     source?: 'PORTAL' | 'LINKEDIN';
+    noticePeriod?: number;
   }): Promise<Candidate> => {
     const res = await api.post<ApiResponse<Candidate>>('/candidates', data);
     return res.data.data!;
@@ -100,6 +102,7 @@ export const candidateApi = {
       linkedinUrl?: string;
       website?: string;
       notes?: string;
+      noticePeriod?: number;
     }
   ): Promise<Candidate> => {
     const res = await api.patch<ApiResponse<Candidate>>(`/candidates/${id}`, data);

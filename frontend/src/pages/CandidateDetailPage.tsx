@@ -19,9 +19,10 @@ import { humanize, formatDateTime } from '../utils/format';
 import { useToast } from '../components/shared/Toast';
 import { useConfirm } from '../components/shared/Confirm';
 import { isAdminRole } from '../utils/roles';
+import { isValidNoticePeriod, isValidOptionalEmail } from '../utils/validation';
 
 const CAN_ACT_ROLES = ['ADMIN', 'CLIENT'];
-const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function Stars({ value }: { value: number }) {
   return (
@@ -86,6 +87,7 @@ export default function CandidateDetailPage() {
     linkedinUrl: '',
     website: '',
     notes: '',
+    noticePeriod: '',
   });
 
   const { data: candidate, isLoading, error, refetch } = useQuery({
@@ -188,6 +190,7 @@ export default function CandidateDetailPage() {
         linkedinUrl: editForm.linkedinUrl.trim() || undefined,
         website: editForm.website.trim() || undefined,
         notes: editForm.notes.trim() || undefined,
+        noticePeriod: editForm.noticePeriod.trim() ? Number(editForm.noticePeriod) : undefined,
       }),
     onSuccess: () => {
       setShowEditModal(false);
@@ -196,6 +199,18 @@ export default function CandidateDetailPage() {
     },
     onError: fail('Couldn’t update this candidate'),
   });
+
+  const submitEdit = () => {
+    if (!isValidOptionalEmail(editForm.email)) {
+      toast.error('Invalid email', 'Enter a valid email address.');
+      return;
+    }
+    if (!isValidNoticePeriod(editForm.noticePeriod)) {
+      toast.error('Invalid notice period', 'Enter a whole number of days, 0 or more.');
+      return;
+    }
+    updateCandidate.mutate();
+  };
 
   const openEditModal = () => {
     if (!candidate) return;
@@ -211,6 +226,7 @@ export default function CandidateDetailPage() {
       linkedinUrl: candidate.linkedinUrl || '',
       website: candidate.website || '',
       notes: candidate.notes || '',
+      noticePeriod: candidate.noticePeriod != null ? String(candidate.noticePeriod) : '',
     });
     setShowEditModal(true);
   };
@@ -417,6 +433,12 @@ export default function CandidateDetailPage() {
                         >
                           <Icon name="mail" size={13} /> {candidate.email}
                         </a>
+                      )}
+                      {candidate.noticePeriod != null && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Icon name="calendar" size={13} /> {candidate.noticePeriod}{' '}
+                          {candidate.noticePeriod === 1 ? 'day' : 'days'} notice
+                        </span>
                       )}
                     </div>
                   </div>
@@ -969,6 +991,20 @@ export default function CandidateDetailPage() {
               )}
             </Field>
 
+            <Field label="Notice period" hint="days">
+              {(fid) => (
+                <Input
+                  id={fid}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={editForm.noticePeriod}
+                  onChange={(e) => setEditForm({ ...editForm, noticePeriod: e.target.value })}
+                  placeholder="e.g. 30"
+                />
+              )}
+            </Field>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="LinkedIn URL">
                 {(fid) => (
@@ -1062,7 +1098,7 @@ export default function CandidateDetailPage() {
               <Button
                 type="button"
                 variant="primary"
-                onClick={() => updateCandidate.mutate()}
+                onClick={submitEdit}
                 disabled={!editForm.firstName.trim() || !editForm.lastName.trim()}
                 loading={updateCandidate.isPending}
               >

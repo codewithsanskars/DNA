@@ -33,6 +33,16 @@ const parseHoursPerDay = (value?: string): string => value?.match(/[\d.]+/)?.[0]
 const formatHoursPerDay = (value: string): string | undefined =>
   value.trim() ? `${value.trim()} hrs/day` : undefined;
 
+// Billable hours represent a single day, so they're bounded to (0, 24] and
+// kept to half-hour increments to match how the field is billed.
+const isValidBillableHours = (value: string): boolean => {
+  if (!value.trim()) return true;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return false;
+  if (num <= 0 || num > 24) return false;
+  return Math.round(num * 2) === num * 2;
+};
+
 // IN_HOUSE reads differently depending on who's looking: from SWFS's side
 // the client runs their own payroll; from the client's side it's their own.
 const inHousePayrollLabel = (isAdmin: boolean) => (isAdmin ? 'Client Payroll' : 'Own Payroll');
@@ -195,6 +205,10 @@ export default function JobsPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (!isValidBillableHours(billableHours)) {
+      toast.error('Invalid billable hours', 'Enter a value greater than 0 and up to 24, in half-hour increments.');
+      return;
+    }
     const parsedPayRate = payRate.trim() ? Number(payRate) : undefined;
     const parsedBillRate = billRate.trim() ? Number(billRate) : undefined;
     if (isEditing) {
@@ -316,7 +330,7 @@ export default function JobsPage() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               {isAdmin && (
-                <Field label="Pay rate" hint="$/hr · not shown to the client">
+                <Field label="Pay rate" hint="$/hr">
                   {(id) => (
                     <Input
                       id={id}
@@ -353,7 +367,7 @@ export default function JobsPage() {
                   <Input
                     id={id}
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={24}
                     step={0.5}
                     value={billableHours}
