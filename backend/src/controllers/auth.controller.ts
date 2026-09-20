@@ -125,7 +125,40 @@ export const authController = {
   me: async (req: any, res: Response, next: NextFunction) => {
     try {
       const user = await userRepository.findById(req.user.userId);
-      res.json({ success: true, data: { ...req.user, name: user?.name } });
+      res.json({ success: true, data: { ...req.user, name: user?.name, email: user?.email } });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  // Self-service profile edit — name/email only. Email here is purely a
+  // portal contact field, decoupled from Okta identity/login, so changing it
+  // doesn't touch `oktaId` or require re-verification.
+  updateMe: async (req: any, res: Response, next: NextFunction) => {
+    try {
+      const { name, email } = req.body;
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (!trimmedName) {
+        res.status(400).json({ success: false, error: 'Name is required' });
+        return;
+      }
+      const normalizedEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
+      if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        res.status(400).json({ success: false, error: 'A valid email is required' });
+        return;
+      }
+
+      const existing = await userRepository.findByEmail(normalizedEmail);
+      if (existing && existing.id !== req.user.userId) {
+        res.status(409).json({ success: false, error: 'That email is already in use' });
+        return;
+      }
+
+      const updated = await userRepository.update(req.user.userId, {
+        name: trimmedName,
+        email: normalizedEmail,
+      });
+      res.json({ success: true, data: { ...req.user, name: updated?.name, email: updated?.email } });
     } catch (err) {
       next(err);
     }

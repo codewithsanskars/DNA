@@ -38,12 +38,21 @@ export const authService = {
   loginByEmail: async (email: string): Promise<{ token: string; user: any }> => {
     const normalizedEmail = email.toLowerCase().trim();
 
-    let user = await userRepository.findByEmail(normalizedEmail);
+    const user = await userRepository.findByEmail(normalizedEmail);
     if (!user) {
-      // Auto-provision user for prototype
-      const namePart = normalizedEmail.split('@')[0].replace(/[._]/g, ' ');
-      const name = namePart.replace(/\b\w/g, (c) => c.toUpperCase());
-      user = await userRepository.create({ email: normalizedEmail, name });
+      // Unlike the Okta path (which hands back a `register` result so the
+      // frontend can confirm an org before creating anything), this plain
+      // email login used to auto-provision a brand-new account for *any*
+      // unrecognized address. That silently orphaned people who'd renamed
+      // their own email via the profile page and then signed back in with
+      // their old address (e.g. a stale "demo account" shortcut): instead of
+      // erroring, it spun up a fresh blank account under the old address.
+      throw Object.assign(
+        new Error(
+          `No account found for ${normalizedEmail}. If you recently changed your email, sign in with your new address instead.`
+        ),
+        { statusCode: 404 }
+      );
     }
 
     return authService.completeLogin(user, normalizedEmail);

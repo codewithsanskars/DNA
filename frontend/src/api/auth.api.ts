@@ -29,4 +29,9 @@ export const authApi = {
     });
     return res.data.data!;
   },
+
+  updateProfile: async (data: { name: string; email: string }): Promise<AuthUser> => {
+    const res = await api.patch<ApiResponse<AuthUser>>('/auth/me', data);
+    return res.data.data!;
+  },
 };

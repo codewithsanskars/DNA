@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import Avatar from '../shared/Avatar';
-import Icon from '../shared/Icon';
 
 export default function UserMenu() {
   const { user } = useAuth();
@@ -48,27 +47,22 @@ export default function UserMenu() {
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-64 rounded-lg border border-border bg-card shadow-lg animate-scale-in">
-          <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              navigate('/settings');
+            }}
+            className="flex w-full items-center gap-2.5 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted"
+          >
             <Avatar name={user.name || user.email} title={user.name} />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-foreground">{user.name || user.email}</p>
               {user.name && <p className="truncate text-xs text-muted-foreground">{user.email}</p>}
             </div>
-          </div>
+          </button>
 
           <div className="flex flex-col py-1">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                navigate('/settings');
-              }}
-              className="flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-foreground transition-colors hover:bg-muted"
-            >
-              <Icon name="settings" size={15} className="text-subtle-foreground" />
-              Settings
-            </button>
-
             <div className="flex items-center px-4 py-2.5 text-[13px] text-foreground">
               {user.role}
             </div>
