@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { initials } from '../../utils/format';
 
-type AvatarSize = 'xs' | 'sm' | 'md' | 'lg';
+type AvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 const SIZES: Record<AvatarSize, string> = {
   xs: 'h-7 w-7 text-2xs',
   sm: 'h-8 w-8 text-[13px]',
   md: 'h-9 w-9 text-[13px]',
   lg: 'h-14 w-14 text-lg',
+  xl: 'h-24 w-24 text-3xl',
 };
 
 interface AvatarProps {

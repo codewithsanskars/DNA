@@ -11,14 +11,17 @@ import { OktaProfile } from './okta.service';
 // Any other email (including real Okta logins) is auto-provisioned as a
 // CLIENT under the default org, or keeps whatever org/role it already has.
 const MOCK_USER_ORG_MAP: Record<string, { orgSlug: string; role: UserRole }> = {
-  'admin@swfs.ai': { orgSlug: 'org_techcorp', role: 'ADMIN' },
-  'client.admin@techcorp.com': { orgSlug: 'org_techcorp', role: 'CLIENT' },
+  'admin@swfs.ai': {
+     orgSlug: 'org_techcorp', role: 'ADMIN' },
+
+  'client.@techcorp.com': { orgSlug: 'org_techcorp', role: 'CLIENT' },
+  
   'client.admin@financegroup.com': { orgSlug: 'org_financegroup', role: 'CLIENT' },
   'client.admin@meridianhealth.com': { orgSlug: 'org_meridianhealth', role: 'CLIENT' },
 };
 const DEFAULT_ORG_SLUG = 'org_techcorp';
 
-type UserRecord = { id: string; email: string; name: string; oktaId?: string };
+type UserRecord = { id: string; email: string; name: string; oktaId?: string; avatarUrl?: string | null };
 
 // Short-lived token that carries a first-time Okta identity across the
 // "pick your organization" registration step, since we don't create the
@@ -136,7 +139,7 @@ export const authService = {
       organizationName: org.name,
     };
     const token = jwt.sign(jwtPayload, env.jwtSecret, { expiresIn: env.jwtExpiresIn as any });
-    return { token, user: { ...jwtPayload, name: user.name } };
+    return { token, user: { ...jwtPayload, name: user.name, avatarUrl: user.avatarUrl ?? null } };
   },
 
   // Shared tail for both login paths: resolve the org + role (an existing
@@ -180,7 +183,7 @@ export const authService = {
     };
 
     const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn as any });
-    return { token, user: { ...payload, name: user.name } };
+    return { token, user: { ...payload, name: user.name, avatarUrl: user.avatarUrl ?? null } };
   },
 
   verifyToken: (token: string): JwtPayload => {

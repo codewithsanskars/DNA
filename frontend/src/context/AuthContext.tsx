@@ -22,6 +22,8 @@ interface AuthContextValue {
   completeOktaRegistration: (organizationName: string) => Promise<void>;
   cancelOktaRegistration: () => void;
   updateProfile: (data: { name: string; email: string }) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  removeAvatar: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -113,6 +115,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
+  const uploadAvatar = async (file: File) => {
+    const updated = await authApi.uploadAvatar(file);
+    setUser(updated);
+  };
+
+  const removeAvatar = async () => {
+    const updated = await authApi.removeAvatar();
+    setUser(updated);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -127,6 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         completeOktaRegistration,
         cancelOktaRegistration,
         updateProfile,
+        uploadAvatar,
+        removeAvatar,
       }}
     >
       {children}

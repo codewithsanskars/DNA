@@ -42,7 +42,7 @@ export default function UserMenu() {
         ].join(' ')}
       >
 
-        <Avatar name={user.name || user.email} title={user.name} />
+        <Avatar name={user.name || user.email} title={user.name} imageUrl={user.avatarUrl} />
       </button>
 
       {open && (
@@ -55,7 +55,7 @@ export default function UserMenu() {
             }}
             className="flex w-full items-center gap-2.5 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted"
           >
-            <Avatar name={user.name || user.email} title={user.name} />
+            <Avatar name={user.name || user.email} title={user.name} imageUrl={user.avatarUrl} />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-foreground">{user.name || user.email}</p>
               {user.name && <p className="truncate text-xs text-muted-foreground">{user.email}</p>}

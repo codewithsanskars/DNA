@@ -10,7 +10,7 @@ import swfsLogo from '../assets/SWFS-LOGO.png';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin', org: 'All clients', email: 'admin@swfs.ai' },
-  { label: 'Client', org: 'TechCorp', email: 'client.admin@techcorp.com' },
+  { label: 'Client', org: 'TechCorp', email: 'client.client@techcorp.com' },
   { label: 'Client', org: 'FinanceGroup', email: 'client.admin@financegroup.com' },
   { label: 'Client', org: 'Meridian Health', email: 'client.admin@meridianhealth.com' },
 ];

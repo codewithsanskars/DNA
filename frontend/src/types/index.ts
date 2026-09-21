@@ -44,6 +44,7 @@ export interface AuthUser {
   role: UserRole;
   organizationId: string;
   organizationName: string;
+  avatarUrl?: string | null;
 }
 
 export interface Job {

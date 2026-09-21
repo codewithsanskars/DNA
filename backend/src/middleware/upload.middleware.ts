@@ -81,3 +81,33 @@ export function uploadJobDescription(req: Request, res: Response, next: NextFunc
     next();
   });
 }
+
+const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2MB
+
+// Kept in memory (not written to disk) since the resulting buffer is base64-encoded
+// straight into the User.avatarUrl column rather than served from a file path.
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AVATAR_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_AVATAR_MIME_TYPES.includes(file.mimetype)) {
+      cb(new Error('Photo must be a JPG, PNG, or WebP image'));
+      return;
+    }
+    cb(null, true);
+  },
+}).single('avatar');
+
+/** Wraps multer's callback-style errors into the shape error.middleware.ts expects. */
+export function uploadAvatar(req: Request, res: Response, next: NextFunction): void {
+  avatarUpload(req, res, (err: any) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE' ? 'Photo must be 2MB or smaller' : err.message || 'Upload failed';
+      const wrapped = Object.assign(new Error(message), { statusCode: 400 });
+      next(wrapped);
+      return;
+    }
+    next();
+  });
+}

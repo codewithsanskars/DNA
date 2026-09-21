@@ -34,4 +34,16 @@ export const authApi = {
     const res = await api.patch<ApiResponse<AuthUser>>('/auth/me', data);
     return res.data.data!;
   },
+
+  uploadAvatar: async (file: File): Promise<AuthUser> => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    const res = await api.post<ApiResponse<AuthUser>>('/auth/me/avatar', formData);
+    return res.data.data!;
+  },
+
+  removeAvatar: async (): Promise<AuthUser> => {
+    const res = await api.delete<ApiResponse<AuthUser>>('/auth/me/avatar');
+    return res.data.data!;
+  },
 };
