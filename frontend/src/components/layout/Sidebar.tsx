@@ -4,7 +4,7 @@ import { isAdminRole } from '../../utils/roles';
 import Icon, { IconName } from '../shared/Icon';
 import IconButton from '../shared/IconButton';
 import Avatar from '../shared/Avatar';
-import swfsLogo from '../../assets/SWFS-LOGO.png';
+import { useThemedLogo } from '../../utils/logo';
 
 const NAV: { to: string; label: string; icon: IconName; adminOnly?: boolean }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -34,6 +34,7 @@ function SidebarContent({ rail = false, onNavigate, onToggleCollapse }: SidebarC
   const { user, logout } = useAuth();
   const admin = isAdminRole(user?.role);
   const avatarName = user?.name || user?.email;
+  const swfsLogo = useThemedLogo();
 
   return (
     <div

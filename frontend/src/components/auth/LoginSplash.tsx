@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import swfsLogo from '../../assets/SWFS-LOGO.png';
+import { useThemedLogo } from '../../utils/logo';
 
 // Keep this in sync with the `logo-intro` animation duration in tailwind.config.js.
 const ANIMATION_MS = 1800;
@@ -11,6 +11,7 @@ interface LoginSplashProps {
 
 /** Full-screen overlay shown briefly right after a fresh sign-in (not a resumed session). */
 export default function LoginSplash({ onDone }: LoginSplashProps) {
+  const swfsLogo = useThemedLogo();
   // A backgrounded tab (or a browser that just doesn't fire the event) can
   // mean `onAnimationEnd` never lands — this timer guarantees the splash
   // always gets dismissed even then, instead of staying stuck on screen.
