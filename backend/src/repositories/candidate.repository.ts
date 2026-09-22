@@ -7,6 +7,7 @@ import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
 const interviewFeedbackRepo = () => AppDataSource.getRepository(InterviewFeedback);
+const feedbackRepo = () => AppDataSource.getRepository(CandidateFeedback);
 
 const RELATIONS = [
   'applications',
@@ -24,6 +25,7 @@ function toDto(c: Candidate) {
     lastName: c.lastName,
     email: c.email,
     phone: c.phone,
+    currentlyWorking: c.currentlyWorking,
     currentTitle: c.currentTitle,
     currentCompany: c.currentCompany,
     location: c.location,
@@ -31,6 +33,9 @@ function toDto(c: Candidate) {
     // Served through the authenticated download route, not a direct file path.
     resumeUrl: c.resumeUrl ? `/api/candidates/${c.id}/resume` : undefined,
     resumeFileName: c.resumeFileName,
+    // Served through the authenticated download route, not a direct file path.
+    photoUrl: c.photoUrl ? `/api/candidates/${c.id}/photo` : undefined,
+    photoFileName: c.photoFileName,
     linkedinUrl: c.linkedinUrl,
     website: c.website,
     notes: c.notes,
@@ -212,9 +217,8 @@ export const candidateRepository = {
     id: string,
     entry: { author: string; authorRole?: string; comment: string; rating?: number }
   ) => {
-    const feedbackRepo = AppDataSource.getRepository(CandidateFeedback);
-    await feedbackRepo.save(
-      feedbackRepo.create({
+    await feedbackRepo().save(
+      feedbackRepo().create({
         candidate: { id } as any,
         authorEmail: entry.author,
         authorRole: entry.authorRole as any,
@@ -223,6 +227,14 @@ export const candidateRepository = {
       })
     );
     return candidateRepository.findById(id);
+  },
+
+  deleteFeedback: async (feedbackId: string) => {
+    await feedbackRepo().delete(feedbackId);
+  },
+
+  deleteInterviewFeedback: async (feedbackId: string) => {
+    await interviewFeedbackRepo().delete(feedbackId);
   },
 
   updateDetails: async (id: string, data: Partial<Candidate>) => {
@@ -268,6 +280,31 @@ export const candidateRepository = {
       .createQueryBuilder()
       .update(Candidate)
       .set({ resumeUrl: () => 'NULL', resumeFileName: () => 'NULL' })
+      .where('id = :id', { id })
+      .execute();
+    return candidateRepository.findById(id);
+  },
+
+  // Same pair of helpers as the resume, for the candidate's photo.
+  getPhotoFile: async (id: string) => {
+    const candidate = await repo().findOne({
+      where: { id },
+      select: ['id', 'photoUrl', 'photoFileName'],
+    });
+    if (!candidate?.photoUrl) return null;
+    return { storedName: candidate.photoUrl, fileName: candidate.photoFileName };
+  },
+
+  setPhoto: async (id: string, storedName: string, fileName: string) => {
+    await repo().update(id, { photoUrl: storedName, photoFileName: fileName });
+    return candidateRepository.findById(id);
+  },
+
+  clearPhoto: async (id: string) => {
+    await repo()
+      .createQueryBuilder()
+      .update(Candidate)
+      .set({ photoUrl: () => 'NULL', photoFileName: () => 'NULL' })
       .where('id = :id', { id })
       .execute();
     return candidateRepository.findById(id);

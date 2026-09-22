@@ -107,6 +107,7 @@ export interface Candidate {
   lastName: string;
   email: string;
   phone?: string;
+  currentlyWorking?: boolean;
   currentTitle?: string;
   currentCompany?: string;
   location?: string;
@@ -114,6 +115,8 @@ export interface Candidate {
   skills: string[];
   resumeUrl?: string;
   resumeFileName?: string;
+  photoUrl?: string;
+  photoFileName?: string;
   linkedinUrl?: string;
   website?: string;
   notes?: string;

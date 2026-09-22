@@ -1,5 +1,6 @@
 import { candidateRepository } from '../repositories/candidate.repository';
 import { jobRepository } from '../repositories/job.repository';
+import { Candidate } from '../entities/Candidate';
 import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
 import { GLOBAL_STATUSES, STATUS_OPTIONS_BY_GLOBAL_STATUS } from '../entities/enums';
 
@@ -49,6 +50,16 @@ export const candidateService = {
     return candidateRepository.advanceInterviewRound(candidateId, jobId);
   },
 
+  // Rolling out an offer for a specific role both advances that role's
+  // pipeline stage to OFFER (so the "Selected" view can show which position
+  // it was for) and moves the candidate's overall status to SELECTED.
+  selectCandidateForJob: async (candidateId: string, jobId: string, organizationId: string | null) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    await candidateRepository.updateStageForJob(candidateId, jobId, 'OFFER');
+    return candidateRepository.updateGlobalStatus(candidateId, 'SELECTED', 'SELECTED');
+  },
+
   submitFeedback: async (
     candidateId: string,
     organizationId: string | null,
@@ -90,6 +101,45 @@ export const candidateService = {
     });
   },
 
+  // Only the person who left a piece of feedback can delete it — checked
+  // against the DTO's already-scoped feedback list rather than a fresh
+  // query, so the same organization/candidate access rules apply.
+  deleteFeedback: async (
+    candidateId: string,
+    organizationId: string | null,
+    feedbackId: string,
+    requesterEmail: string
+  ) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    const entry = (candidate.feedback || []).find((f) => f.id === feedbackId);
+    if (!entry) throw new Error('Feedback not found');
+    if (entry.author !== requesterEmail) {
+      throw Object.assign(new Error('You can only delete your own feedback'), { statusCode: 403 });
+    }
+    await candidateRepository.deleteFeedback(feedbackId);
+    return candidateRepository.findById(candidateId);
+  },
+
+  deleteInterviewFeedback: async (
+    candidateId: string,
+    organizationId: string | null,
+    feedbackId: string,
+    requesterEmail: string
+  ) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    const entry = (candidate.jobLinks || [])
+      .flatMap((link) => link.interviewFeedback || [])
+      .find((f) => f.id === feedbackId);
+    if (!entry) throw new Error('Feedback not found');
+    if (entry.author !== requesterEmail) {
+      throw Object.assign(new Error('You can only delete your own feedback'), { statusCode: 403 });
+    }
+    await candidateRepository.deleteInterviewFeedback(feedbackId);
+    return candidateRepository.findById(candidateId);
+  },
+
   // organizationId === null aggregates the pipeline summary across every client.
   getPipelineSummary: async (organizationId: string | null) => {
     return candidateRepository.countByStage(organizationId);
@@ -102,6 +152,7 @@ export const candidateService = {
       lastName: string;
       email?: string;
       phone?: string;
+      currentlyWorking?: boolean;
       currentTitle?: string;
       currentCompany?: string;
       location?: string;
@@ -127,8 +178,9 @@ export const candidateService = {
       lastName: data.lastName,
       email: data.email ?? '',
       phone: data.phone,
-      currentTitle: data.currentTitle,
-      currentCompany: data.currentCompany,
+      currentlyWorking: data.currentlyWorking,
+      currentTitle: data.currentlyWorking ? data.currentTitle : undefined,
+      currentCompany: data.currentlyWorking ? data.currentCompany : undefined,
       location: data.location,
       jobLinks,
       skills: data.skills || [],
@@ -154,6 +206,7 @@ export const candidateService = {
       lastName?: string;
       email?: string;
       phone?: string;
+      currentlyWorking?: boolean;
       currentTitle?: string;
       currentCompany?: string;
       location?: string;
@@ -177,7 +230,15 @@ export const candidateService = {
         throw new Error('noticePeriod must be a whole number of days, 0 or more');
       }
     }
-    return candidateRepository.updateDetails(candidateId, data);
+    // Not currently working means designation/company no longer apply —
+    // clear them (an `undefined` value here is skipped by the update, not
+    // written as NULL, so it has to be explicit).
+    const updates: Partial<Candidate> = { ...data };
+    if (data.currentlyWorking === false) {
+      updates.currentTitle = null as unknown as undefined;
+      updates.currentCompany = null as unknown as undefined;
+    }
+    return candidateRepository.updateDetails(candidateId, updates);
   },
 
   updateGlobalStatus: async (
@@ -252,6 +313,30 @@ export const candidateService = {
     const previous = await candidateRepository.getResumeFile(candidateId);
     if (!previous) throw new Error('Candidate has no resume');
     const updated = await candidateRepository.clearResume(candidateId);
+    return { candidate: updated, previous };
+  },
+
+  // Same trio of operations as the resume, for the candidate's photo.
+  getPhotoFile: async (candidateId: string, organizationId: string | null) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) return null;
+    return candidateRepository.getPhotoFile(candidateId);
+  },
+
+  setPhoto: async (candidateId: string, organizationId: string | null, storedName: string, fileName: string) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    const previous = await candidateRepository.getPhotoFile(candidateId);
+    const updated = await candidateRepository.setPhoto(candidateId, storedName, fileName);
+    return { candidate: updated, previous };
+  },
+
+  deletePhoto: async (candidateId: string, organizationId: string | null) => {
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw new Error('Candidate not found');
+    const previous = await candidateRepository.getPhotoFile(candidateId);
+    if (!previous) throw new Error('Candidate has no photo');
+    const updated = await candidateRepository.clearPhoto(candidateId);
     return { candidate: updated, previous };
   },
 };

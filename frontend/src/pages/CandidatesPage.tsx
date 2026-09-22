@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
 import Badge, { StageBadge, GlobalStatusBadge, CandidateStatusBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
-import Avatar from '../components/shared/Avatar';
+import CandidateAvatar from '../components/candidates/CandidateAvatar';
+import PhotoPicker from '../components/candidates/PhotoPicker';
 import Icon from '../components/shared/Icon';
 import Modal from '../components/shared/Modal';
 import { Field, Input, Select, Textarea } from '../components/shared/Field';
@@ -14,7 +15,6 @@ import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { Candidate, GlobalStatus } from '../types';
 import { humanize } from '../utils/format';
-import { errorMessage } from '../utils/errors';
 import { useJobs } from '../hooks/useJobs';
 import { useCandidates } from '../hooks/useCandidates';
 import { useAuth } from '../context/AuthContext';
@@ -38,6 +38,7 @@ export default function CandidatesPage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [currentlyWorking, setCurrentlyWorking] = useState<'yes' | 'no'>('yes');
   const [currentTitle, setCurrentTitle] = useState('');
   const [currentCompany, setCurrentCompany] = useState('');
   const [location, setLocation] = useState('');
@@ -52,6 +53,21 @@ export default function CandidatesPage() {
   // queued locally and uploaded right after the candidate is created.
   const [pendingResumeFile, setPendingResumeFile] = useState<File | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // No candidate id exists yet while creating, so the photo is only ever
+  // previewed locally until it's uploaded after the candidate is saved.
+  useEffect(() => {
+    if (!pendingPhotoFile) {
+      setPhotoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pendingPhotoFile);
+    setPhotoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingPhotoFile]);
 
   // Kept in the URL (not local state) so the tab survives a round trip
   // through a candidate's detail page — the back button there returns here
@@ -73,6 +89,7 @@ export default function CandidatesPage() {
     setLastName('');
     setEmail('');
     setPhone('');
+    setCurrentlyWorking('yes');
     setCurrentTitle('');
     setCurrentCompany('');
     setLocation('');
@@ -84,6 +101,7 @@ export default function CandidatesPage() {
     setNoticePeriod('');
     setJobId(jobIdParam || '');
     setPendingResumeFile(null);
+    setPendingPhotoFile(null);
   };
 
   const createCandidate = useMutation({
@@ -91,24 +109,39 @@ export default function CandidatesPage() {
     onSuccess: async (candidate) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      const resumeFile = pendingResumeFile;
+      const photoFile = pendingPhotoFile;
       resetForm();
-      if (!pendingResumeFile) {
-        toast.success(
-          'Candidate added',
-          candidate ? `${candidate.firstName} ${candidate.lastName} is now in your list.` : undefined
-        );
+      const name = candidate ? `${candidate.firstName} ${candidate.lastName}` : undefined;
+      if (!resumeFile && !photoFile) {
+        toast.success('Candidate added', name ? `${name} is now in your list.` : undefined);
         return;
       }
-      // The candidate now has an id, so the queued résumé can go up. Reported
-      // separately since it's a second request that can fail independently.
-      try {
-        await candidateApi.uploadResume(candidate._id, pendingResumeFile);
-        queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
-        toast.success('Candidate added', `${candidate.firstName} ${candidate.lastName} is now in your list, with their résumé attached.`);
-      } catch (err) {
+      // The candidate now has an id, so the queued files can go up. Reported
+      // separately since each is a request that can fail independently of
+      // candidate creation (and of each other).
+      const failures: string[] = [];
+      if (resumeFile) {
+        try {
+          await candidateApi.uploadResume(candidate._id, resumeFile);
+        } catch {
+          failures.push('résumé');
+        }
+      }
+      if (photoFile) {
+        try {
+          await candidateApi.uploadPhoto(candidate._id, photoFile);
+        } catch {
+          failures.push('photo');
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
+      if (failures.length === 0) {
+        toast.success('Candidate added', `${name} is now in your list, with the files attached.`);
+      } else {
         toast.error(
-          `${candidate.firstName} ${candidate.lastName} was added, but the résumé couldn’t be attached`,
-          errorMessage(err, 'You can attach it from their profile.')
+          `${name} was added, but the ${failures.join(' and ')} couldn’t be attached`,
+          'You can attach it from their profile.'
         );
       }
     },
@@ -132,8 +165,9 @@ export default function CandidatesPage() {
       lastName: lastName.trim(),
       email: email.trim(),
       phone: phone.trim() || undefined,
-      currentTitle: currentTitle.trim() || undefined,
-      currentCompany: currentCompany.trim() || undefined,
+      currentlyWorking: currentlyWorking === 'yes',
+      currentTitle: currentlyWorking === 'yes' ? currentTitle.trim() || undefined : undefined,
+      currentCompany: currentlyWorking === 'yes' ? currentCompany.trim() || undefined : undefined,
       location: location.trim() || undefined,
       skills: skills
         .split(',')
@@ -158,10 +192,30 @@ export default function CandidatesPage() {
     setPendingResumeFile(file);
   };
 
+  const handlePhotoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(jpe?g)$/i.test(file.name)) {
+      toast.error('Photo must be a .jpg or .jpeg file');
+      return;
+    }
+    setPendingPhotoFile(file);
+  };
+
   const loading = jobsLoading || candidatesLoading;
 
   const clientNames = (c: Candidate) => {
     const names = Array.from(new Set(c.jobLinks.map((l) => l.organizationName).filter(Boolean)));
+    return names.length ? names.join(', ') : '—';
+  };
+
+  // The role(s) a candidate was actually selected/hired for — the ones whose
+  // stage has advanced to OFFER or HIRED — rather than every role they're linked to.
+  const selectedPositionNames = (c: Candidate) => {
+    const names = Array.from(
+      new Set(c.jobLinks.filter((l) => l.stage === 'OFFER' || l.stage === 'HIRED').map((l) => l.jobTitle))
+    );
     return names.length ? names.join(', ') : '—';
   };
 
@@ -195,12 +249,37 @@ export default function CandidatesPage() {
       {showForm && (
         <Modal
           title="New candidate"
-          description="Add a candidate to the portal."
           onClose={resetForm}
           size="full"
           centered
         >
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex flex-col items-center gap-2">
+              <PhotoPicker
+                imageUrl={photoPreviewUrl}
+                name={firstName || lastName ? `${firstName} ${lastName}` : undefined}
+                onClick={() => photoInputRef.current?.click()}
+              />
+              {pendingPhotoFile ? (
+                <button
+                  type="button"
+                  onClick={() => setPendingPhotoFile(null)}
+                  className="text-2xs text-muted-foreground hover:text-foreground"
+                >
+                  Remove photo
+                </button>
+              ) : (
+                <p className="text-2xs text-subtle-foreground">.jpg or .jpeg</p>
+              )}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept=".jpg,.jpeg,image/jpeg"
+                className="hidden"
+                onChange={handlePhotoFile}
+              />
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="First name" required>
                 {(id) => (
@@ -234,28 +313,39 @@ export default function CandidatesPage() {
               </Field>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Current designation">
-                {(id) => (
-                  <Input
-                    id={id}
-                    value={currentTitle}
-                    onChange={(e) => setCurrentTitle(e.target.value)}
-                    placeholder="e.g. Backend Engineer"
-                  />
-                )}
-              </Field>
-              <Field label="Current company">
-                {(id) => (
-                  <Input
-                    id={id}
-                    value={currentCompany}
-                    onChange={(e) => setCurrentCompany(e.target.value)}
-                    placeholder="e.g. Acme Corp"
-                  />
-                )}
-              </Field>
-            </div>
+            <Field label="Currently working?">
+              {(id) => (
+                <Select id={id} value={currentlyWorking} onChange={(e) => setCurrentlyWorking(e.target.value as 'yes' | 'no')}>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </Select>
+              )}
+            </Field>
+
+            {currentlyWorking === 'yes' && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Current designation">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={currentTitle}
+                      onChange={(e) => setCurrentTitle(e.target.value)}
+                      placeholder="e.g. Backend Engineer"
+                    />
+                  )}
+                </Field>
+                <Field label="Current company">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={currentCompany}
+                      onChange={(e) => setCurrentCompany(e.target.value)}
+                      placeholder="e.g. Acme Corp"
+                    />
+                  )}
+                </Field>
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Location">
@@ -309,32 +399,14 @@ export default function CandidatesPage() {
               {(id) => <Textarea id={id} value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />}
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Source">
-                {(id) => (
-                  <Select id={id} value={source} onChange={(e) => setSource(e.target.value as 'PORTAL' | 'LINKEDIN')}>
-                    <option value="PORTAL">Portal</option>
-                    <option value="LINKEDIN">LinkedIn</option>
-                  </Select>
-                )}
-              </Field>
-              <Field
-                label="Link to role"
-                hint="optional"
-                help="A candidate's client is determined by the role(s) they're linked to — leave this unset to keep them in the unassigned pool for now."
-              >
-                {(id) => (
-                  <Select id={id} value={jobId} onChange={(e) => setJobId(e.target.value)}>
-                    <option value="">No role yet</option>
-                    {(jobs || []).map((j) => (
-                      <option key={j._id} value={j._id}>
-                        {j.title}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </Field>
-            </div>
+            <Field label="Source">
+              {(id) => (
+                <Select id={id} value={source} onChange={(e) => setSource(e.target.value as 'PORTAL' | 'LINKEDIN')}>
+                  <option value="PORTAL">Portal</option>
+                  <option value="LINKEDIN">LinkedIn</option>
+                </Select>
+              )}
+            </Field>
 
             <div className="border-t border-border pt-4">
               <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">Résumé</p>
@@ -408,13 +480,14 @@ export default function CandidatesPage() {
       </div>
 
       {loading ? (
-        <TableSkeleton cols={showClient ? 7 : 6} />
+        <TableSkeleton cols={showClient ? 8 : 6} />
       ) : (
         <TableShell>
           <Thead>
             <tr>
               <Th>Name</Th>
               {showClient && <Th>Client</Th>}
+              {showClient && <Th>Position</Th>}
               <Th>Designation</Th>
               <Th>Company</Th>
               <Th>Location</Th>
@@ -427,7 +500,7 @@ export default function CandidatesPage() {
               <Tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)}>
                 <Td>
                   <div className="flex items-center gap-3">
-                    <Avatar name={c.firstName} />
+                    <CandidateAvatar candidateId={c._id} name={c.firstName} photoUrl={c.photoUrl} version={c.syncedAt} />
                     <span className="font-medium text-foreground">
                       {c.firstName} {c.lastName}
                     </span>
@@ -437,6 +510,7 @@ export default function CandidatesPage() {
                   </div>
                 </Td>
                 {showClient && <Td>{clientNames(c)}</Td>}
+                {showClient && <Td>{selectedPositionNames(c)}</Td>}
                 <Td>{c.currentTitle || '—'}</Td>
                 <Td>{c.currentCompany || '—'}</Td>
                 <Td>{c.location || '—'}</Td>
@@ -471,7 +545,7 @@ export default function CandidatesPage() {
               </Tr>
             ))}
             {filtered.length === 0 && (
-              <EmptyRow colSpan={showClient ? 7 : 6}>
+              <EmptyRow colSpan={showClient ? 8 : 6}>
                 {jobIdParam
                   ? `No ${humanize(activeTab).toLowerCase()} candidates linked to this role.`
                   : `No ${humanize(activeTab).toLowerCase()} candidates yet.`}

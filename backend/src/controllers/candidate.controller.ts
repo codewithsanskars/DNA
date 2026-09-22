@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types';
 import { candidateService } from '../services/candidate.service';
 import { auditLogService } from '../services/auditLog.service';
 import { isAdminRole } from '../utils/roles';
-import { RESUME_DIR } from '../middleware/upload.middleware';
+import { RESUME_DIR, CANDIDATE_PHOTO_DIR } from '../middleware/upload.middleware';
 
 function badRequest(message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode: 400 });
@@ -24,6 +24,16 @@ function assertValidEmail(value: unknown): void {
   }
 }
 
+// Accepts both a real boolean (JSON body) and the string a plain form field
+// would send ("true"/"false"), so either kind of caller works.
+function parseBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw badRequest('currentlyWorking must be true or false');
+}
+
 // Notice period is always whole days — anything else (fractional, negative,
 // non-numeric) would otherwise reach the `int` column and either fail
 // silently (truncated) or throw an opaque 500.
@@ -34,6 +44,16 @@ function parseNoticePeriod(value: unknown): number | undefined {
     throw badRequest('Notice period must be a whole number of days, 0 or more');
   }
   return num;
+}
+
+// A rating is optional (a plain comment has none), but when given it must be
+// a real star pick — 1 through 5, never 0 or negative.
+function assertValidRating(value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1 || num > 5) {
+    throw badRequest('Rating must be between 1 and 5');
+  }
 }
 
 export const candidateController = {
@@ -69,6 +89,7 @@ export const candidateController = {
         lastName,
         email,
         phone,
+        currentlyWorking,
         currentTitle,
         currentCompany,
         location,
@@ -85,6 +106,7 @@ export const candidateController = {
         lastName,
         email,
         phone,
+        currentlyWorking: parseBoolean(currentlyWorking),
         currentTitle,
         currentCompany,
         location,
@@ -133,6 +155,22 @@ export const candidateController = {
     }
   },
 
+  selectCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { jobId } = req.body;
+      if (!jobId) {
+        res.status(400).json({ success: false, error: 'jobId is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const updated = await candidateService.selectCandidateForJob(req.params.id, jobId, orgScope);
+      await auditLogService.log(req.user!, 'SELECT_CANDIDATE', 'candidate', req.params.id, { jobId });
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   requestInterview: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { jobId, ...requestData } = req.body;
@@ -164,6 +202,7 @@ export const candidateController = {
         res.status(400).json({ success: false, error: 'feedback is required' });
         return;
       }
+      assertValidRating(rating);
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
       const result = await candidateService.submitInterviewFeedback(
         req.params.id,
@@ -193,6 +232,7 @@ export const candidateController = {
         res.status(400).json({ success: false, error: 'feedback is required' });
         return;
       }
+      assertValidRating(rating);
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
       const result = await candidateService.submitFeedback(
         req.params.id,
@@ -208,9 +248,45 @@ export const candidateController = {
     }
   },
 
+  deleteFeedback: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const result = await candidateService.deleteFeedback(
+        req.params.id,
+        orgScope,
+        req.params.feedbackId,
+        req.user!.email
+      );
+      await auditLogService.log(req.user!, 'DELETE_FEEDBACK', 'candidate', req.params.id, {
+        feedbackId: req.params.feedbackId,
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deleteInterviewFeedback: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const result = await candidateService.deleteInterviewFeedback(
+        req.params.id,
+        orgScope,
+        req.params.feedbackId,
+        req.user!.email
+      );
+      await auditLogService.log(req.user!, 'DELETE_INTERVIEW_FEEDBACK', 'candidate', req.params.id, {
+        feedbackId: req.params.feedbackId,
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   createCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { jobId, firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, notes, source, noticePeriod } = req.body;
+      const { jobId, firstName, lastName, email, phone, currentlyWorking, currentTitle, currentCompany, location, skills, linkedinUrl, website, notes, source, noticePeriod } = req.body;
       if (!firstName || !lastName) {
         res.status(400).json({ success: false, error: 'firstName and lastName are required' });
         return;
@@ -223,6 +299,7 @@ export const candidateController = {
         lastName,
         email,
         phone,
+        currentlyWorking: parseBoolean(currentlyWorking),
         currentTitle,
         currentCompany,
         location,
@@ -340,6 +417,63 @@ export const candidateController = {
       const { candidate, previous } = await candidateService.deleteResume(req.params.id, orgScope);
       if (previous) fs.unlink(path.join(RESUME_DIR, previous.storedName), () => {});
       await auditLogService.log(req.user!, 'DELETE_RESUME', 'candidate', req.params.id, {});
+      res.json({ success: true, data: candidate });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  uploadPhoto: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'A .jpg or .jpeg photo file is required' });
+        return;
+      }
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const { candidate, previous } = await candidateService.setPhoto(
+        req.params.id,
+        orgScope,
+        req.file.filename,
+        req.file.originalname
+      );
+      if (previous) fs.unlink(path.join(CANDIDATE_PHOTO_DIR, previous.storedName), () => {});
+      await auditLogService.log(req.user!, 'UPLOAD_CANDIDATE_PHOTO', 'candidate', req.params.id, {
+        fileName: req.file.originalname,
+      });
+      res.json({ success: true, data: candidate });
+    } catch (err) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      next(err);
+    }
+  },
+
+  // Served inline (not as an attachment) so it can be used directly as an
+  // <img src> — unlike the resume, which is meant to be downloaded/viewed as a document.
+  getPhoto: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const file = await candidateService.getPhotoFile(req.params.id, orgScope);
+      if (!file) {
+        res.status(404).json({ success: false, error: 'Photo not found' });
+        return;
+      }
+      const filePath = path.join(CANDIDATE_PHOTO_DIR, file.storedName);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ success: false, error: 'Photo file is missing' });
+        return;
+      }
+      res.sendFile(filePath);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deletePhoto: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
+      const { candidate, previous } = await candidateService.deletePhoto(req.params.id, orgScope);
+      if (previous) fs.unlink(path.join(CANDIDATE_PHOTO_DIR, previous.storedName), () => {});
+      await auditLogService.log(req.user!, 'DELETE_CANDIDATE_PHOTO', 'candidate', req.params.id, {});
       res.json({ success: true, data: candidate });
     } catch (err) {
       next(err);

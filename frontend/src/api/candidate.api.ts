@@ -22,6 +22,11 @@ export const candidateApi = {
     return res.data.data!;
   },
 
+  selectCandidate: async (id: string, jobId: string): Promise<Candidate> => {
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/select`, { jobId });
+    return res.data.data!;
+  },
+
   requestInterview: async (
     id: string,
     jobId: string,
@@ -33,6 +38,11 @@ export const candidateApi = {
 
   submitFeedback: async (id: string, feedback: string, rating?: number): Promise<void> => {
     await api.post(`/candidates/${id}/feedback`, { feedback, rating });
+  },
+
+  deleteFeedback: async (id: string, feedbackId: string): Promise<Candidate> => {
+    const res = await api.delete<ApiResponse<Candidate>>(`/candidates/${id}/feedback/${feedbackId}`);
+    return res.data.data!;
   },
 
   submitInterviewFeedback: async (
@@ -51,12 +61,18 @@ export const candidateApi = {
     return res.data.data!;
   },
 
+  deleteInterviewFeedback: async (id: string, feedbackId: string): Promise<Candidate> => {
+    const res = await api.delete<ApiResponse<Candidate>>(`/candidates/${id}/interview-feedback/${feedbackId}`);
+    return res.data.data!;
+  },
+
   createCandidate: async (data: {
     jobId?: string;
     firstName: string;
     lastName: string;
     email?: string;
     phone?: string;
+    currentlyWorking?: boolean;
     currentTitle?: string;
     currentCompany?: string;
     location?: string;
@@ -95,6 +111,7 @@ export const candidateApi = {
       lastName?: string;
       email?: string;
       phone?: string;
+      currentlyWorking?: boolean;
       currentTitle?: string;
       currentCompany?: string;
       location?: string;
@@ -156,6 +173,25 @@ export const candidateApi = {
 
   deleteResume: async (id: string): Promise<Candidate> => {
     const res = await api.delete<ApiResponse<Candidate>>(`/candidates/${id}/resume`);
+    return res.data.data!;
+  },
+
+  uploadPhoto: async (id: string, file: File): Promise<Candidate> => {
+    const form = new FormData();
+    form.append('photo', file);
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/photo`, form);
+    return res.data.data!;
+  },
+
+  // Same reasoning as getResumeBlob: the route is authenticated, so a plain
+  // <img src> can't carry the token — fetch it through axios and hand back a blob.
+  getPhotoBlob: async (id: string): Promise<Blob> => {
+    const res = await api.get(`/candidates/${id}/photo`, { responseType: 'blob' });
+    return res.data;
+  },
+
+  deletePhoto: async (id: string): Promise<Candidate> => {
+    const res = await api.delete<ApiResponse<Candidate>>(`/candidates/${id}/photo`);
     return res.data.data!;
   },
 };

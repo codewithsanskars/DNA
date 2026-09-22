@@ -32,6 +32,12 @@ export class Candidate {
   @Column({ nullable: true })
   phone?: string;
 
+  // Whether the candidate currently holds a job — currentTitle/currentCompany
+  // only make sense when this is true, but they stay on the entity regardless
+  // so a "No" answer doesn't wipe out previously entered values.
+  @Column({ type: 'boolean', nullable: true })
+  currentlyWorking?: boolean;
+
   @Column({ nullable: true })
   currentTitle?: string;
 
@@ -53,6 +59,15 @@ export class Candidate {
   // Original filename the resume/CV was uploaded with, for display and download.
   @Column({ nullable: true })
   resumeFileName?: string;
+
+  // Stores the on-disk filename under uploads/candidate-photos/ (see
+  // upload.middleware.ts), not a public URL — served through the
+  // authenticated /candidates/:id/photo route, same as the resume.
+  @Column({ nullable: true })
+  photoUrl?: string;
+
+  @Column({ nullable: true })
+  photoFileName?: string;
 
   @Column({ nullable: true })
   linkedinUrl?: string;

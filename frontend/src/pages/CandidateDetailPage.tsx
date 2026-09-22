@@ -5,6 +5,9 @@ import AppLayout from '../components/layout/AppLayout';
 import Badge, { StageBadge, GlobalStatusBadge, CandidateStatusBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
 import Avatar from '../components/shared/Avatar';
+import CandidateAvatar from '../components/candidates/CandidateAvatar';
+import PhotoPicker from '../components/candidates/PhotoPicker';
+import { useCandidatePhotoUrl } from '../hooks/useCandidatePhotoUrl';
 import { CenteredSpinner } from '../components/shared/LoadingSpinner';
 import { ErrorState, EmptyState } from '../components/shared/States';
 import { Field, Input, Textarea, Select } from '../components/shared/Field';
@@ -73,6 +76,7 @@ export default function CandidateDetailPage() {
   const resumeInputRef = useRef<HTMLInputElement>(null);
   const [downloadingResume, setDownloadingResume] = useState(false);
   const [viewingResume, setViewingResume] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -80,6 +84,7 @@ export default function CandidateDetailPage() {
     lastName: '',
     email: '',
     phone: '',
+    currentlyWorking: 'yes' as 'yes' | 'no',
     currentTitle: '',
     currentCompany: '',
     location: '',
@@ -97,6 +102,7 @@ export default function CandidateDetailPage() {
   });
 
   const { data: jobs } = useJobs();
+  const editPhotoUrl = useCandidatePhotoUrl(candidate?._id || '', candidate?.photoUrl, candidate?.syncedAt);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.candidate(id!) });
@@ -119,6 +125,15 @@ export default function CandidateDetailPage() {
       toast.success('Candidate shortlisted');
     },
     onError: fail('Couldn’t shortlist candidate'),
+  });
+
+  const selectCandidate = useMutation({
+    mutationFn: (jobId: string) => withPending(jobId, () => candidateApi.selectCandidate(id!, jobId)),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Candidate selected');
+    },
+    onError: fail('Couldn’t select candidate'),
   });
 
   const reject = useMutation({
@@ -180,8 +195,9 @@ export default function CandidateDetailPage() {
         lastName: editForm.lastName.trim(),
         email: editForm.email.trim() || undefined,
         phone: editForm.phone.trim() || undefined,
-        currentTitle: editForm.currentTitle.trim() || undefined,
-        currentCompany: editForm.currentCompany.trim() || undefined,
+        currentlyWorking: editForm.currentlyWorking === 'yes',
+        currentTitle: editForm.currentlyWorking === 'yes' ? editForm.currentTitle.trim() || undefined : undefined,
+        currentCompany: editForm.currentlyWorking === 'yes' ? editForm.currentCompany.trim() || undefined : undefined,
         location: editForm.location.trim() || undefined,
         skills: editForm.skills
           .split(',')
@@ -219,6 +235,7 @@ export default function CandidateDetailPage() {
       lastName: candidate.lastName,
       email: candidate.email || '',
       phone: candidate.phone || '',
+      currentlyWorking: candidate.currentlyWorking === false ? 'no' : 'yes',
       currentTitle: candidate.currentTitle || '',
       currentCompany: candidate.currentCompany || '',
       location: candidate.location || '',
@@ -298,6 +315,45 @@ export default function CandidateDetailPage() {
     if (ok) deleteResume.mutate();
   };
 
+  const uploadPhoto = useMutation({
+    mutationFn: (file: File) => candidateApi.uploadPhoto(id!, file),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Photo attached');
+    },
+    onError: fail('Couldn’t attach that photo'),
+  });
+
+  const deletePhoto = useMutation({
+    mutationFn: () => candidateApi.deletePhoto(id!),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Photo removed');
+    },
+    onError: fail('Couldn’t remove the photo'),
+  });
+
+  const handlePhotoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(jpe?g)$/i.test(file.name)) {
+      toast.error('Photo must be a .jpg or .jpeg file');
+      return;
+    }
+    uploadPhoto.mutate(file);
+  };
+
+  const confirmDeletePhoto = async () => {
+    const ok = await confirm({
+      title: 'Remove photo?',
+      description: `This removes the photo from ${candidate?.firstName} ${candidate?.lastName}'s profile.`,
+      confirmLabel: 'Remove photo',
+      tone: 'danger',
+    });
+    if (ok) deletePhoto.mutate();
+  };
+
   const submitFeedback = useMutation({
     mutationFn: () => candidateApi.submitFeedback(id!, feedback, rating || undefined),
     onSuccess: () => {
@@ -309,6 +365,45 @@ export default function CandidateDetailPage() {
     },
     onError: fail('Couldn’t submit feedback'),
   });
+
+  const deleteFeedback = useMutation({
+    mutationFn: (feedbackId: string) => candidateApi.deleteFeedback(id!, feedbackId),
+    onSuccess: () => {
+      invalidate();
+      toast.success(candidate?.globalStatus === 'ARCHIVED' ? 'Comment removed' : 'Feedback removed');
+    },
+    onError: fail(candidate?.globalStatus === 'ARCHIVED' ? 'Couldn’t remove the comment' : 'Couldn’t remove the feedback'),
+  });
+
+  const confirmDeleteFeedback = async (feedbackId: string) => {
+    const archived = candidate?.globalStatus === 'ARCHIVED';
+    const ok = await confirm({
+      title: archived ? 'Remove comment?' : 'Remove feedback?',
+      description: `This removes your ${archived ? 'comment' : 'feedback'} from ${candidate?.firstName} ${candidate?.lastName}'s profile.`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (ok) deleteFeedback.mutate(feedbackId);
+  };
+
+  const deleteInterviewFeedback = useMutation({
+    mutationFn: (feedbackId: string) => candidateApi.deleteInterviewFeedback(id!, feedbackId),
+    onSuccess: () => {
+      invalidate();
+      toast.success('Interview feedback removed');
+    },
+    onError: fail('Couldn’t remove the interview feedback'),
+  });
+
+  const confirmDeleteInterviewFeedback = async (feedbackId: string) => {
+    const ok = await confirm({
+      title: 'Remove interview feedback?',
+      description: `This removes your interview feedback from ${candidate?.firstName} ${candidate?.lastName}'s profile.`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (ok) deleteInterviewFeedback.mutate(feedbackId);
+  };
 
   // Opens Google Calendar's "new event" composer prefilled for this interview
   // round — frontend-only, no Calendar API/backend integration. Fire-and-
@@ -330,8 +425,8 @@ export default function CandidateDetailPage() {
     requestInterview.mutate(jobId);
   };
 
-  const handleRollOutOffer = () => {
-    toast.info('Coming soon', 'Rolling out offer letters isn’t built yet.');
+  const handleSelectCandidate = (jobId: string) => {
+    selectCandidate.mutate(jobId);
   };
 
   const confirmReject = async (jobId: string, jobTitle: string) => {
@@ -400,7 +495,13 @@ export default function CandidateDetailPage() {
         <div className="space-y-6 lg:col-span-2">
           <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
             <div className="flex items-start gap-4">
-              <Avatar name={candidate.firstName} size="lg" />
+              <CandidateAvatar
+                candidateId={candidate._id}
+                name={candidate.firstName}
+                photoUrl={candidate.photoUrl}
+                version={candidate.syncedAt}
+                size="lg"
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -466,6 +567,15 @@ export default function CandidateDetailPage() {
                     </span>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {candidate.notes && (
+              <div className="mt-5 border-t border-border pt-4">
+                <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">Notes</p>
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+                  {candidate.notes}
+                </p>
               </div>
             )}
 
@@ -549,7 +659,7 @@ export default function CandidateDetailPage() {
                           key={r}
                           type="button"
                           aria-label={`${r} star${r > 1 ? 's' : ''}`}
-                          onClick={() => setRating(r === rating ? 0 : r)}
+                          onClick={() => setRating(r)}
                           className={`transition-colors ${
                             r <= rating ? 'text-amber-400' : 'text-border-strong hover:text-amber-400/60'
                           }`}
@@ -570,7 +680,7 @@ export default function CandidateDetailPage() {
                     variant="primary"
                     size="sm"
                     onClick={() => submitFeedback.mutate()}
-                    disabled={!feedback.trim()}
+                    disabled={!feedback.trim() || (!isArchived && rating < 1)}
                     loading={submitFeedback.isPending}
                   >
                     {submitFeedback.isPending
@@ -609,7 +719,20 @@ export default function CandidateDetailPage() {
                           </p>
                         </div>
                       </div>
-                      {!isArchived && f.rating ? <Stars value={f.rating} /> : null}
+                      <div className="flex shrink-0 items-center gap-2">
+                        {!isArchived && f.rating ? <Stars value={f.rating} /> : null}
+                        {user?.email === f.author && (
+                          <button
+                            type="button"
+                            aria-label="Delete"
+                            title="Delete"
+                            onClick={() => confirmDeleteFeedback(f.id)}
+                            className="text-subtle-foreground transition-colors hover:text-brand-text"
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
                       {f.comment}
@@ -677,7 +800,7 @@ export default function CandidateDetailPage() {
                             key={r}
                             type="button"
                             aria-label={`${r} star${r > 1 ? 's' : ''}`}
-                            onClick={() => setRoundFeedbackRating(r === roundFeedbackRating ? 0 : r)}
+                            onClick={() => setRoundFeedbackRating(r)}
                             className={`transition-colors ${
                               r <= roundFeedbackRating ? 'text-amber-400' : 'text-border-strong hover:text-amber-400/60'
                             }`}
@@ -695,7 +818,7 @@ export default function CandidateDetailPage() {
                         variant="primary"
                         size="sm"
                         onClick={() => submitInterviewFeedback.mutate()}
-                        disabled={!roundFeedbackText.trim()}
+                        disabled={!roundFeedbackText.trim() || roundFeedbackRating < 1}
                         loading={submitInterviewFeedback.isPending}
                       >
                         {submitInterviewFeedback.isPending ? 'Submitting…' : 'Submit feedback'}
@@ -730,7 +853,20 @@ export default function CandidateDetailPage() {
                               </p>
                             </div>
                           </div>
-                          {f.rating ? <Stars value={f.rating} /> : null}
+                          <div className="flex shrink-0 items-center gap-2">
+                            {f.rating ? <Stars value={f.rating} /> : null}
+                            {user?.email === f.author && (
+                              <button
+                                type="button"
+                                aria-label="Delete"
+                                title="Delete"
+                                onClick={() => confirmDeleteInterviewFeedback(f.id)}
+                                className="text-subtle-foreground transition-colors hover:text-brand-text"
+                              >
+                                <Icon name="trash" size={14} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
                           {f.comment}
@@ -811,8 +947,13 @@ export default function CandidateDetailPage() {
                               {link.interviewRound === 0 ? 'Interview' : `Schedule round ${link.interviewRound + 1}`}
                             </Button>
                           ) : (
-                            <Button variant="primary" size="sm" onClick={handleRollOutOffer} disabled={isPending}>
-                              Roll out offer letter
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleSelectCandidate(link.jobId)}
+                              disabled={isPending}
+                            >
+                              Select Candidate
                             </Button>
                           )}
                           <Button
@@ -904,6 +1045,31 @@ export default function CandidateDetailPage() {
           centered
         >
           <div className="space-y-4">
+            <div className="flex flex-col items-center gap-2">
+              <PhotoPicker
+                imageUrl={editPhotoUrl}
+                name={candidate.firstName}
+                onClick={() => photoInputRef.current?.click()}
+                loading={uploadPhoto.isPending}
+              />
+              {candidate.photoUrl && (
+                <button
+                  type="button"
+                  onClick={confirmDeletePhoto}
+                  className="text-2xs text-muted-foreground hover:text-foreground"
+                >
+                  Remove photo
+                </button>
+              )}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept=".jpg,.jpeg,image/jpeg"
+                className="hidden"
+                onChange={handlePhotoFile}
+              />
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="First name" required>
                 {(fid) => (
@@ -949,26 +1115,41 @@ export default function CandidateDetailPage() {
               </Field>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Current designation">
-                {(fid) => (
-                  <Input
-                    id={fid}
-                    value={editForm.currentTitle}
-                    onChange={(e) => setEditForm({ ...editForm, currentTitle: e.target.value })}
-                  />
-                )}
-              </Field>
-              <Field label="Current company">
-                {(fid) => (
-                  <Input
-                    id={fid}
-                    value={editForm.currentCompany}
-                    onChange={(e) => setEditForm({ ...editForm, currentCompany: e.target.value })}
-                  />
-                )}
-              </Field>
-            </div>
+            <Field label="Currently working?">
+              {(fid) => (
+                <Select
+                  id={fid}
+                  value={editForm.currentlyWorking}
+                  onChange={(e) => setEditForm({ ...editForm, currentlyWorking: e.target.value as 'yes' | 'no' })}
+                >
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </Select>
+              )}
+            </Field>
+
+            {editForm.currentlyWorking === 'yes' && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Current designation">
+                  {(fid) => (
+                    <Input
+                      id={fid}
+                      value={editForm.currentTitle}
+                      onChange={(e) => setEditForm({ ...editForm, currentTitle: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Current company">
+                  {(fid) => (
+                    <Input
+                      id={fid}
+                      value={editForm.currentCompany}
+                      onChange={(e) => setEditForm({ ...editForm, currentCompany: e.target.value })}
+                    />
+                  )}
+                </Field>
+              </div>
+            )}
 
             <Field label="Location">
               {(fid) => (
