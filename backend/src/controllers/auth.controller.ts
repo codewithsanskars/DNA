@@ -125,7 +125,10 @@ export const authController = {
   me: async (req: any, res: Response, next: NextFunction) => {
     try {
       const user = await userRepository.findById(req.user.userId);
-      res.json({ success: true, data: { ...req.user, name: user?.name, email: user?.email } });
+      res.json({
+        success: true,
+        data: { ...req.user, name: user?.name, email: user?.email, avatarUrl: user?.avatarUrl ?? null },
+      });
     } catch (err) {
       next(err);
     }
@@ -158,7 +161,43 @@ export const authController = {
         name: trimmedName,
         email: normalizedEmail,
       });
-      res.json({ success: true, data: { ...req.user, name: updated?.name, email: updated?.email } });
+      res.json({
+        success: true,
+        data: { ...req.user, name: updated?.name, email: updated?.email, avatarUrl: updated?.avatarUrl ?? null },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  // Multer (see uploadAvatar middleware) has already validated mimetype/size
+  // and put the raw bytes on req.file.buffer — encode straight to a data URI
+  // rather than writing to disk, since Avatar.avatarUrl is rendered directly
+  // as an <img src>.
+  uploadMyAvatar: async (req: any, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'No photo was uploaded' });
+        return;
+      }
+      const dataUri = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const updated = await userRepository.update(req.user.userId, { avatarUrl: dataUri });
+      res.json({
+        success: true,
+        data: { ...req.user, name: updated?.name, email: updated?.email, avatarUrl: updated?.avatarUrl ?? null },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  removeMyAvatar: async (req: any, res: Response, next: NextFunction) => {
+    try {
+      const updated = await userRepository.update(req.user.userId, { avatarUrl: null });
+      res.json({
+        success: true,
+        data: { ...req.user, name: updated?.name, email: updated?.email, avatarUrl: updated?.avatarUrl ?? null },
+      });
     } catch (err) {
       next(err);
     }

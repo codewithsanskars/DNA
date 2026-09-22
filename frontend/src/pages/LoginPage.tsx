@@ -6,11 +6,11 @@ import { authApi } from '../api/auth.api';
 import Button from '../components/shared/Button';
 import { Input } from '../components/shared/Field';
 import Icon from '../components/shared/Icon';
-import swfsLogo from '../assets/SWFS-LOGO.png';
+import { useThemedLogo } from '../utils/logo';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin', org: 'All clients', email: 'admin@swfs.ai' },
-  { label: 'Client', org: 'TechCorp', email: 'client.admin@techcorp.com' },
+  { label: 'Client', org: 'TechCorp', email: 'client.client@techcorp.com' },
   { label: 'Client', org: 'FinanceGroup', email: 'client.admin@financegroup.com' },
   { label: 'Client', org: 'Meridian Health', email: 'client.admin@meridianhealth.com' },
 ];
@@ -32,6 +32,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const swfsLogo = useThemedLogo();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);

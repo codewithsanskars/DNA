@@ -25,7 +25,7 @@ export class User {
   @Column({ nullable: true })
   oktaId?: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   avatarUrl?: string;
 
   @Column({ default: true })
