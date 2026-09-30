@@ -31,8 +31,9 @@ const shared = {
   entities,
   migrations: ['src/migrations/*.ts'],
   // Template default: auto-create the schema from entities in dev.
-  // Switch to migrations (`synchronize: false`) before production.
-  synchronize: env.nodeEnv !== 'production',
+  // DB_SYNC=true forces it on in production too (there are no migrations yet);
+  // switch to migrations before relying on production data.
+  synchronize: env.nodeEnv !== 'production' || process.env.DB_SYNC === 'true',
   logging: env.nodeEnv === 'development',
 };
 

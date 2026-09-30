@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import path from 'path';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -12,8 +14,22 @@ import { errorHandler, notFound } from './middleware/error.middleware';
 
 const app = express();
 
+// Behind Render's (or any) reverse proxy — needed so req.ip / rate limiting
+// see the real client address instead of the proxy's.
+app.set('trust proxy', 1);
+
 // Security
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        // blob: for candidate photo previews, https: for organization logos
+        // hosted on company sites.
+        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: env.frontendUrl,
@@ -44,6 +60,15 @@ app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().to
 
 // API routes
 app.use('/api', apiRoutes);
+
+// In a single-service deploy the backend also serves the built React app.
+// Skipped when frontend/dist doesn't exist (local dev uses the Vite server).
+const FRONTEND_DIST = path.join(__dirname, '../../frontend/dist');
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST));
+  // SPA fallback: any non-API GET gets index.html so client-side routes work on refresh.
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(FRONTEND_DIST, 'index.html')));
+}
 
 // Error handling
 app.use(notFound);
