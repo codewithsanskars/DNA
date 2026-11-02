@@ -1,7 +1,26 @@
+import { pdfService } from '../services/pdf.service';
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { organizationService } from '../services/organization.service';
 import { auditLogService } from '../services/auditLog.service';
+import { badRequest, optionalNumber, optionalString, requiredString } from '../utils/http';
+
+function contactFields(body: Record<string, unknown>, requireName: boolean) {
+  const email = optionalString(body.email, 'Email', 320);
+  assertValidEmail(email);
+  const fields = {
+    name: requireName ? requiredString(body.name, 'Name', 200) : optionalString(body.name, 'Name', 200),
+    title: optionalString(body.title, 'Title', 200),
+    email,
+    phone: optionalString(body.phone, 'Phone', 50),
+    linkedinUrl: optionalString(body.linkedinUrl, 'LinkedIn URL', 500),
+    notes: optionalString(body.notes, 'Notes', 5000),
+    isDecisionMaker: typeof body.isDecisionMaker === 'boolean' ? body.isDecisionMaker : undefined,
+    isHiringManager: typeof body.isHiringManager === 'boolean' ? body.isHiringManager : undefined,
+  };
+  if (fields.name === '') throw badRequest('Name cannot be empty');
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+}
 
 // Same pattern the browser's own `type="email"` validation uses (the
 // WHATWG HTML spec's email regex).
@@ -58,6 +77,23 @@ export const organizationController = {
     }
   },
 
+  /** GET /organization/:id/pdf — clients only for their own org. */
+  downloadPdf: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const isAdmin = req.user!.role === 'ADMIN';
+      if (!isAdmin && req.params.id !== req.user!.organizationId) {
+        res.status(403).json({ success: false, error: 'Access denied to this organization' });
+        return;
+      }
+      const { buffer, fileName } = await pdfService.organizationProfile(req.params.id, isAdmin);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(buffer);
+    } catch (err) {
+      next(err);
+    }
+  },
+
   scrapeCompanyPage: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { url } = req.body;
@@ -106,6 +142,66 @@ export const organizationController = {
 
       await auditLogService.log(req.user!, 'CREATE_ORGANIZATION', 'organization', org._id, { name: org.name });
       res.status(201).json({ success: true, data: org });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  updateOrganization: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const b = req.body;
+      const name = optionalString(b.name, 'Company name', 200);
+      if (name === '') throw badRequest('Company name cannot be empty');
+      const email = optionalString(b.email, 'Email', 320);
+      assertValidEmail(email);
+      const employeeCount = optionalNumber(b.employeeCount, 'Employee count', { min: 0, integer: true });
+      const input = Object.fromEntries(
+        Object.entries({
+          name,
+          industry: optionalString(b.industry, 'Industry', 200),
+          website: optionalString(b.website, 'Website', 500),
+          logoUrl: optionalString(b.logoUrl, 'Logo URL', 1000),
+          email,
+          description: optionalString(b.description, 'Description', 10_000),
+          hq: optionalString(b.hq, 'Headquarters', 200),
+          employeeCount: employeeCount === null ? undefined : employeeCount,
+          founded: optionalString(b.founded, 'Founded', 50),
+          socialLinks: b.socialLinks && typeof b.socialLinks === 'object' ? b.socialLinks : undefined,
+        }).filter(([, v]) => v !== undefined)
+      );
+      const org = await organizationService.updateOrganization(req.params.id, input);
+      await auditLogService.log(req.user!, 'UPDATE_ORGANIZATION', 'organization', req.params.id, input);
+      res.json({ success: true, data: org });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  addContact: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const org = await organizationService.addContact(req.params.id, contactFields(req.body, true));
+      await auditLogService.log(req.user!, 'ADD_CONTACT', 'organization', req.params.id, { name: req.body.name });
+      res.status(201).json({ success: true, data: org });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  updateContact: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const org = await organizationService.updateContact(req.params.id, req.params.contactId, contactFields(req.body, false));
+      await auditLogService.log(req.user!, 'UPDATE_CONTACT', 'organization', req.params.id, { contactId: req.params.contactId });
+      res.json({ success: true, data: org });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deleteContact: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const org = await organizationService.deleteContact(req.params.id, req.params.contactId);
+      await auditLogService.log(req.user!, 'DELETE_CONTACT', 'organization', req.params.id, { contactId: req.params.contactId });
+      res.json({ success: true, data: org });
     } catch (err) {
       next(err);
     }

@@ -1,5 +1,7 @@
 import { organizationRepository } from '../repositories/organization.repository';
 import { scrapeService, ScrapedOrganization } from './scrape.service';
+import { OrganizationContact } from '../entities';
+import { notFound } from '../utils/http';
 
 export interface CreateOrganizationInput {
   name: string;
@@ -57,5 +59,29 @@ export const organizationService = {
   /** Fetches a company's public page and extracts fields for the "add organization" form to prefill. */
   scrapeCompanyPage: async (url: string): Promise<ScrapedOrganization> => {
     return scrapeService.scrapeCompanyPage(url);
+  },
+
+  /** Admin edit of a client's profile (RC-18). The slug never changes. */
+  updateOrganization: async (id: string, input: Partial<CreateOrganizationInput>) => {
+    const org = await organizationRepository.findById(id);
+    if (!org) throw notFound('Organization not found');
+    return organizationRepository.update(id, input);
+  },
+
+  // ---- Contacts (RC-83 / RC-84) ---------------------------------------------
+
+  addContact: async (organizationId: string, data: Partial<OrganizationContact>) => {
+    if (!(await organizationRepository.findById(organizationId))) throw notFound('Organization not found');
+    return organizationRepository.createContact(organizationId, data);
+  },
+
+  updateContact: async (organizationId: string, contactId: string, data: Partial<OrganizationContact>) => {
+    if (!(await organizationRepository.findContact(organizationId, contactId))) throw notFound('Contact not found');
+    return organizationRepository.updateContact(organizationId, contactId, data);
+  },
+
+  deleteContact: async (organizationId: string, contactId: string) => {
+    if (!(await organizationRepository.findContact(organizationId, contactId))) throw notFound('Contact not found');
+    return organizationRepository.deleteContact(organizationId, contactId);
   },
 };

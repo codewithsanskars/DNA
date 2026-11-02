@@ -7,6 +7,7 @@ import Button from '../components/shared/Button';
 import CandidateAvatar from '../components/candidates/CandidateAvatar';
 import PhotoPicker from '../components/candidates/PhotoPicker';
 import Icon from '../components/shared/Icon';
+import { ResumeAutofill, mergeParsed } from '../components/ai/AiWidgets';
 import Modal from '../components/shared/Modal';
 import { Field, Input, Select, Textarea } from '../components/shared/Field';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
@@ -16,12 +17,22 @@ import { queryKeys } from '../api/queryKeys';
 import { Candidate, GlobalStatus } from '../types';
 import { humanize } from '../utils/format';
 import { useJobs } from '../hooks/useJobs';
-import { useCandidates } from '../hooks/useCandidates';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { jobApi } from '../api/job.api';
+import Pagination from '../components/shared/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
 import { isValidEmail, isValidNoticePeriod } from '../utils/validation';
 import { RESUME_ACCEPT } from './CandidateDetailPage';
+import KanbanBoard from '../components/candidates/KanbanBoard';
+import BulkActionBar from '../components/candidates/BulkActionBar';
+import ImportWizard from '../components/candidates/ImportWizard';
+import DuplicateWarning from '../components/candidates/DuplicateWarning';
+import ProfileFieldsEditor, { EMPTY_PROFILE_FORM, ProfileForm, profilePayload } from '../components/candidates/ProfileFieldsEditor';
+import { exportCandidatesCsv } from '../utils/exportCandidates';
+import { SOURCE_LABELS } from '../utils/labels';
+import { CandidateSource } from '../types';
 
 const GLOBAL_STATUS_TABS: GlobalStatus[] = ['OPEN', 'SELECTED', 'ONBOARDED', 'ARCHIVED'];
 
@@ -46,7 +57,12 @@ export default function CandidatesPage() {
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [website, setWebsite] = useState('');
   const [notes, setNotes] = useState('');
-  const [source, setSource] = useState<'PORTAL' | 'LINKEDIN'>('PORTAL');
+  const [source, setSource] = useState<CandidateSource>('PORTAL');
+  const [profileForm, setProfileForm] = useState<ProfileForm>(EMPTY_PROFILE_FORM);
+  // Selection survives paging — keep the full records, not just ids.
+  const [selected, setSelected] = useState<Map<string, Candidate>>(new Map());
+  const [exporting, setExporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [noticePeriod, setNoticePeriod] = useState('');
   const [jobId, setJobId] = useState(jobIdParam || '');
   // Only relevant while creating a candidate (no id yet to upload against) —
@@ -75,11 +91,47 @@ export default function CandidatesPage() {
   const tabParam = searchParams.get('tab') as GlobalStatus | null;
   const activeTab: GlobalStatus = tabParam && GLOBAL_STATUS_TABS.includes(tabParam) ? tabParam : 'OPEN';
   const setActiveTab = (tab: GlobalStatus) => {
-    setSearchParams(tab === 'OPEN' ? {} : { tab }, { replace: false });
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'OPEN') next.delete('tab');
+    else next.set('tab', tab);
+    next.delete('page');
+    setSearchParams(next, { replace: false });
+    setSelected(new Map());
+  };
+  // Board view only makes sense for one role's pipeline.
+  const view = jobIdParam && searchParams.get('view') === 'board' ? 'board' : 'table';
+  const setView = (v: 'table' | 'board') => {
+    const next = new URLSearchParams(searchParams);
+    if (v === 'board') next.set('view', 'board');
+    else next.delete('view');
+    setSearchParams(next);
   };
 
   const { data: jobs, isLoading: jobsLoading } = useJobs();
-  const { data: candidates, isLoading: candidatesLoading } = useCandidates();
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const q = searchParams.get('q') ?? '';
+  const [qDraft, setQDraft] = useState(q);
+  const setListParam = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(updates)) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
+    setSearchParams(next, { replace: true });
+  };
+  const listParams = { globalStatus: activeTab, jobId: jobIdParam, q: q || undefined, page, pageSize: 25 };
+  const listQuery = useQuery({
+    queryKey: queryKeys.candidateList(listParams),
+    queryFn: () => candidateApi.list(listParams),
+    placeholderData: keepPreviousData,
+    enabled: view === 'table',
+  });
+  // The board shows one role's whole pipeline (every status), so it loads that role's list.
+  const boardQuery = useQuery({
+    queryKey: queryKeys.jobPipeline(jobIdParam ?? ''),
+    queryFn: () => jobApi.getJobPipeline(jobIdParam!),
+    enabled: view === 'board' && !!jobIdParam,
+  });
 
   const activeJob = jobIdParam ? jobs?.find((j) => j._id === jobIdParam) : undefined;
 
@@ -98,6 +150,7 @@ export default function CandidatesPage() {
     setWebsite('');
     setNotes('');
     setSource('PORTAL');
+    setProfileForm(EMPTY_PROFILE_FORM);
     setNoticePeriod('');
     setJobId(jobIdParam || '');
     setPendingResumeFile(null);
@@ -159,7 +212,13 @@ export default function CandidatesPage() {
       toast.error('Invalid notice period', 'Enter a whole number of days, 0 or more.');
       return;
     }
+    const profile = profilePayload(profileForm);
+    if (profile.error) {
+      toast.error('Check the profile fields', profile.error);
+      return;
+    }
     createCandidate.mutate({
+      ...profile.payload,
       jobId: jobId || undefined,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -203,7 +262,7 @@ export default function CandidatesPage() {
     setPendingPhotoFile(file);
   };
 
-  const loading = jobsLoading || candidatesLoading;
+  const loading = jobsLoading || (view === 'board' ? boardQuery.isLoading : listQuery.isLoading);
 
   const clientNames = (c: Candidate) => {
     const names = Array.from(new Set(c.jobLinks.map((l) => l.organizationName).filter(Boolean)));
@@ -219,16 +278,32 @@ export default function CandidatesPage() {
     return names.length ? names.join(', ') : '—';
   };
 
-  const byJob = jobIdParam
-    ? (candidates || []).filter((c) => c.jobLinks.some((l) => l.jobId === jobIdParam))
-    : candidates || [];
+  const byJob = boardQuery.data ?? [];
+  const tabCounts = listQuery.data?.counts ?? { OPEN: 0, SELECTED: 0, ONBOARDED: 0, ARCHIVED: 0 };
+  const filtered = listQuery.data?.items ?? [];
+  const selectedList = [...selected.values()];
+  const toggleSelected = (c: Candidate, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (on) next.set(c._id, c);
+      else next.delete(c._id);
+      return next;
+    });
 
-  const tabCounts = GLOBAL_STATUS_TABS.reduce<Record<GlobalStatus, number>>((acc, tab) => {
-    acc[tab] = byJob.filter((c) => c.globalStatus === tab).length;
-    return acc;
-  }, {} as Record<GlobalStatus, number>);
-
-  const filtered = byJob.filter((c) => c.globalStatus === activeTab);
+  // Export the whole filtered list (every page), not just the visible page.
+  const handleExport = async () => {
+    const stem = activeJob ? activeJob.title.replace(/\W+/g, '-').toLowerCase() : 'candidates';
+    if (view === 'board') return exportCandidatesCsv(byJob, isAdmin, stem);
+    setExporting(true);
+    try {
+      const all = await candidateApi.listAll({ globalStatus: activeTab, jobId: jobIdParam, q: q || undefined });
+      exportCandidatesCsv(all, isAdmin, stem);
+    } catch {
+      toast.error('Couldn’t export', 'Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
   const showClient = isAdmin && (activeTab === 'SELECTED' || activeTab === 'ONBOARDED');
 
   return (
@@ -237,13 +312,45 @@ export default function CandidatesPage() {
       backTo={jobIdParam ? '/jobs' : undefined}
       backLabel="Back to roles"
       actions={
-        <>
+        <div className="ml-auto flex items-center gap-2">
+          {jobIdParam && (
+            <div className="flex rounded-md border border-border bg-card p-0.5 shadow-xs" role="group" aria-label="View">
+              {(['table', 'board'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    view === v ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon name={v === 'table' ? 'list' : 'columns'} size={13} />
+                  {v === 'table' ? 'Table' : 'Board'}
+                </button>
+              ))}
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            icon="download"
+            onClick={handleExport}
+            loading={exporting}
+            disabled={loading}
+          >
+            Export
+          </Button>
+          {isAdmin && (
+            <Button variant="secondary" icon="upload" onClick={() => setShowImport(true)}>
+              Import
+            </Button>
+          )}
           {isAdmin && (
             <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
               New candidate
             </Button>
           )}
-        </>
+        </div>
       }
     >
       {showForm && (
@@ -280,6 +387,26 @@ export default function CandidatesPage() {
               />
             </div>
 
+            {isAdmin && (
+              <ResumeAutofill
+                onParsed={(parsed, file) => {
+                  const merged = mergeParsed(
+                    parsed,
+                    { firstName, lastName, email, phone, currentTitle, currentCompany, location, skills, linkedinUrl, website, currentlyWorking },
+                    profileForm
+                  );
+                  const b = merged.basic;
+                  setFirstName(b.firstName); setLastName(b.lastName); setEmail(b.email); setPhone(b.phone);
+                  setCurrentTitle(b.currentTitle); setCurrentCompany(b.currentCompany); setLocation(b.location);
+                  setSkills(b.skills); setLinkedinUrl(b.linkedinUrl); setWebsite(b.website); setCurrentlyWorking(b.currentlyWorking);
+                  setProfileForm(merged.profile);
+                  if (file && !pendingResumeFile) setPendingResumeFile(file);
+                  if (parsed.summary && !notes.trim()) setNotes(parsed.summary);
+                  toast.success('Form filled from résumé', 'Review the details before saving. The résumé is attached too.');
+                }}
+              />
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="First name" required>
                 {(id) => (
@@ -312,6 +439,8 @@ export default function CandidatesPage() {
                 )}
               </Field>
             </div>
+
+            <DuplicateWarning firstName={firstName} lastName={lastName} email={email} phone={phone} linkedinUrl={linkedinUrl} />
 
             <Field label="Currently working?">
               {(id) => (
@@ -401,12 +530,24 @@ export default function CandidatesPage() {
 
             <Field label="Source">
               {(id) => (
-                <Select id={id} value={source} onChange={(e) => setSource(e.target.value as 'PORTAL' | 'LINKEDIN')}>
-                  <option value="PORTAL">Portal</option>
-                  <option value="LINKEDIN">LinkedIn</option>
+                <Select id={id} value={source} onChange={(e) => setSource(e.target.value as CandidateSource)}>
+                  {(Object.keys(SOURCE_LABELS) as CandidateSource[])
+                    .filter((s) => s !== 'IMPORT')
+                    .map((s) => (
+                      <option key={s} value={s}>
+                        {SOURCE_LABELS[s]}
+                      </option>
+                    ))}
                 </Select>
               )}
             </Field>
+
+            <div className="border-t border-border pt-4">
+              <p className="mb-3 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
+                Profile <span className="font-normal normal-case tracking-normal">— optional; history and education can be added from the profile</span>
+              </p>
+              <ProfileFieldsEditor value={profileForm} onChange={setProfileForm} isAdmin={isAdmin} showHistory={false} />
+            </div>
 
             <div className="border-t border-border pt-4">
               <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">Résumé</p>
@@ -459,6 +600,37 @@ export default function CandidatesPage() {
         </Modal>
       )}
 
+      {showImport && <ImportWizard jobs={jobs || []} onClose={() => setShowImport(false)} />}
+
+      {view === 'board' && jobIdParam ? (
+        loading ? (
+          <TableSkeleton cols={6} />
+        ) : (
+          <KanbanBoard jobId={jobIdParam} candidates={byJob} isAdmin={isAdmin} />
+        )
+      ) : (
+      <>
+      {isAdmin && selected.size > 0 && (
+        <BulkActionBar selected={selectedList} jobs={jobs || []} onClear={() => setSelected(new Map())} />
+      )}
+      {!isAdmin && selected.size > 0 && (
+        <div className="sticky top-2 z-20 mb-3 flex items-center gap-3 rounded-lg border border-brand/30 bg-card px-3 py-2 shadow-md">
+          <span className="text-[13px] font-semibold text-foreground">{selected.size} selected</span>
+          <Button
+            size="sm"
+            variant="primary"
+            icon="columns"
+            disabled={selected.size < 2 || selected.size > 4}
+            onClick={() => navigate(`/compare?ids=${selectedList.map((c) => c._id).join(',')}${jobIdParam ? `&jobId=${jobIdParam}` : ''}`)}
+          >
+            Compare
+          </Button>
+          <span className="text-2xs text-subtle-foreground">Pick 2–4 candidates</span>
+          <button type="button" onClick={() => setSelected(new Map())} className="ml-auto text-xs font-medium text-muted-foreground hover:text-foreground">
+            Clear
+          </button>
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap gap-1.5 border-b border-border">
         {GLOBAL_STATUS_TABS.map((tab) => (
           <button
@@ -479,12 +651,50 @@ export default function CandidatesPage() {
         ))}
       </div>
 
+      <form
+        className="mb-3 flex max-w-md gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setListParam({ q: qDraft.trim() || null, page: null });
+        }}
+      >
+        <div className="relative flex-1">
+          <Icon name="search" size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle-foreground" />
+          <Input value={qDraft} onChange={(e) => setQDraft(e.target.value)} placeholder="Search name, title, company, skills…" className="!h-8 !pl-8 !text-xs" aria-label="Search candidates" />
+        </div>
+        {q && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setQDraft('');
+              setListParam({ q: null, page: null });
+            }}
+          >
+            Clear
+          </Button>
+        )}
+      </form>
+
       {loading ? (
         <TableSkeleton cols={showClient ? 8 : 6} />
       ) : (
+        <div className={listQuery.isFetching ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <TableShell>
           <Thead>
             <tr>
+              <Th className="w-10 !pr-0">
+                {isAdmin && (
+                  <input
+                    type="checkbox"
+                    aria-label="Select page"
+                    checked={filtered.length > 0 && filtered.every((c) => selected.has(c._id))}
+                    onChange={(e) => filtered.forEach((c) => toggleSelected(c, e.target.checked))}
+                    className="h-4 w-4 cursor-pointer accent-[#D40000]"
+                  />
+                )}
+              </Th>
               <Th>Name</Th>
               {showClient && <Th>Client</Th>}
               {showClient && <Th>Position</Th>}
@@ -498,6 +708,17 @@ export default function CandidatesPage() {
           <tbody>
             {filtered.map((c) => (
               <Tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)}>
+                <Td className="w-10 !pr-0">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${c.firstName} ${c.lastName}`}
+                    checked={selected.has(c._id)}
+                    disabled={!isAdmin && !selected.has(c._id) && selected.size >= 4}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => toggleSelected(c, e.target.checked)}
+                    className="h-4 w-4 cursor-pointer accent-[#D40000]"
+                  />
+                </Td>
                 <Td>
                   <div className="flex items-center gap-3">
                     <CandidateAvatar candidateId={c._id} name={c.firstName} photoUrl={c.photoUrl} version={c.syncedAt} />
@@ -506,6 +727,15 @@ export default function CandidatesPage() {
                     </span>
                     {c.source === 'LINKEDIN' && (
                       <Icon name="linkedin" size={13} className="shrink-0 text-subtle-foreground" aria-label="Sourced from LinkedIn" />
+                    )}
+                    {isAdmin && !!c.tags?.length && (
+                      <span className="hidden gap-1 xl:flex">
+                        {c.tags.slice(0, 2).map((t) => (
+                          <Badge key={t} tone="purple">
+                            {t}
+                          </Badge>
+                        ))}
+                      </span>
                     )}
                   </div>
                 </Td>
@@ -534,6 +764,9 @@ export default function CandidatesPage() {
                         >
                           <span className="max-w-[10rem] truncate text-foreground">{l.jobTitle}</span>
                           <StageBadge stage={l.stage} />
+                          {!isAdmin && l.stage === 'SUBMITTED' && !l.clientViewedAt && (
+                            <span className="rounded bg-brand px-1 text-[10px] font-semibold text-white">New</span>
+                          )}
                         </span>
                       ))}
                       {c.jobLinks.length > 2 && (
@@ -545,14 +778,28 @@ export default function CandidatesPage() {
               </Tr>
             ))}
             {filtered.length === 0 && (
-              <EmptyRow colSpan={showClient ? 8 : 6}>
-                {jobIdParam
+              <EmptyRow colSpan={(showClient ? 8 : 6) + 1}>
+                {q
+                  ? `No ${humanize(activeTab).toLowerCase()} candidates match “${q}”.`
+                  : jobIdParam
                   ? `No ${humanize(activeTab).toLowerCase()} candidates linked to this role.`
                   : `No ${humanize(activeTab).toLowerCase()} candidates yet.`}
               </EmptyRow>
             )}
           </tbody>
         </TableShell>
+        {listQuery.data && (
+          <Pagination
+            className="mt-3"
+            page={listQuery.data.page}
+            pageSize={listQuery.data.pageSize}
+            total={listQuery.data.total}
+            onPage={(p) => setListParam({ page: p === 1 ? null : String(p) })}
+          />
+        )}
+        </div>
+      )}
+      </>
       )}
     </AppLayout>
   );

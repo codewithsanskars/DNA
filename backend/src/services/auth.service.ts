@@ -11,11 +11,8 @@ import { OktaProfile } from './okta.service';
 // Any other email (including real Okta logins) is auto-provisioned as a
 // CLIENT under the default org, or keeps whatever org/role it already has.
 const MOCK_USER_ORG_MAP: Record<string, { orgSlug: string; role: UserRole }> = {
-  'admin@swfs.ai': {
-     orgSlug: 'org_techcorp', role: 'ADMIN' },
-
-  'client.@techcorp.com': { orgSlug: 'org_techcorp', role: 'CLIENT' },
-  
+  'admin@swfs.ai': { orgSlug: 'org_techcorp', role: 'ADMIN' },
+  'client.admin@techcorp.com': { orgSlug: 'org_techcorp', role: 'CLIENT' },
   'client.admin@financegroup.com': { orgSlug: 'org_financegroup', role: 'CLIENT' },
   'client.admin@meridianhealth.com': { orgSlug: 'org_meridianhealth', role: 'CLIENT' },
 };

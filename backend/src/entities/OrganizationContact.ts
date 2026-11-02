@@ -18,4 +18,19 @@ export class OrganizationContact {
 
   @Column({ nullable: true })
   email?: string;
+
+  @Column({ nullable: true })
+  phone?: string;
+
+  @Column({ nullable: true })
+  linkedinUrl?: string;
+
+  @Column({ default: false })
+  isDecisionMaker!: boolean;
+
+  @Column({ default: false })
+  isHiringManager!: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
 }

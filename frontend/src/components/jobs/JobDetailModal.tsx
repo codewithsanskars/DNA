@@ -16,9 +16,13 @@ import { queryKeys } from '../../api/queryKeys';
 import { useOrganizations } from '../../hooks/useOrganizations';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminRole } from '../../utils/roles';
+import { RankedMatches } from '../ai/AiWidgets';
+import { JobAiInsights } from '../ai/JobInsights';
 import { formatDate, formatRate } from '../../utils/format';
 import { errorMessage } from '../../utils/errors';
 import { Job, WorkType, PayrollType } from '../../types';
+import RecordTimeline from '../workflow/RecordTimeline';
+import RecordTasks from '../workflow/Tasks';
 
 export const JD_ACCEPT =
   '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -37,7 +41,7 @@ const payrollLabel = (type: PayrollType, isAdmin: boolean): string => {
   return isAdmin ? 'Client Payroll' : 'Own Payroll';
 };
 
-type Tab = 'details' | 'candidates';
+type Tab = 'details' | 'candidates' | 'activity' | 'matches';
 
 const detailOrDash = (value?: string | null) => value || '—';
 
@@ -69,6 +73,18 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
   });
 
   const invalidateJob = () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+
+  const deleteJob = useMutation({
+    mutationFn: () => jobApi.deleteJob(job._id),
+    onSuccess: () => {
+      invalidateJob();
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+      toast.success('Role deleted');
+      onClose();
+    },
+    onError: (err) => toast.error('Couldn’t delete the role', errorMessage(err, 'Please try again.')),
+  });
 
   const uploadJd = useMutation({
     mutationFn: (file: File) => jobApi.uploadJobDescription(job._id, file),
@@ -123,7 +139,21 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
   const tabs: { id: Tab; label: string }[] = [
     { id: 'details', label: 'Job info' },
     { id: 'candidates', label: `Candidates · ${job.totalCandidates}` },
+    // Internal notes & follow-ups on the role — SWFS staff only.
+    ...(isAdmin ? [{ id: 'activity' as Tab, label: 'Activity & tasks' }] : []),
+    // AI sourcing over the whole talent pool — SWFS staff only (clients never see the pool).
+    ...(isAdmin ? [{ id: 'matches' as Tab, label: 'AI matches' }] : []),
   ];
+
+  const confirmDeleteJob = async () => {
+    const ok = await confirm({
+      title: `Delete ${job.title}?`,
+      description: `This permanently removes the role and all ${job.totalCandidates} candidate link${job.totalCandidates === 1 ? '' : 's'} on it (candidates themselves are kept). To keep the history, set the role to Closed instead.`,
+      confirmLabel: 'Delete role',
+      tone: 'danger',
+    });
+    if (ok) deleteJob.mutate();
+  };
 
   return (
     <Modal
@@ -142,6 +172,11 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
               onClick={() => navigate(`/jobs/${job._id}`)}
             >
               Open full candidate list
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="ghost" size="sm" icon="trash" onClick={confirmDeleteJob} className={tab === 'candidates' && job.totalCandidates > 0 ? '' : 'mr-auto'}>
+              Delete
             </Button>
           )}
           {onEdit && (
@@ -174,6 +209,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
 
       {tab === 'details' ? (
         <div className="space-y-5">
+          <JobAiInsights jobId={job._id} isAdmin={isAdmin} />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
             <StatusBadge status={job.status} />
             <PriorityBadge priority={job.priority} />
@@ -213,6 +249,15 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
               {detailOrDash(job.payrollType ? payrollLabel(job.payrollType, isAdmin) : undefined)}
             </DetailRow>
             {job.openedAt && <DetailRow label="Opened">{formatDate(job.openedAt)}</DetailRow>}
+            <DetailRow label={isAdmin ? 'Owner' : 'Your SWFS recruiter'}>
+              {job.owner ? (
+                <a href={`mailto:${job.owner.email}`} className="hover:underline">
+                  {job.owner.name}
+                </a>
+              ) : (
+                '—'
+              )}
+            </DetailRow>
           </dl>
 
           <div className="border-t border-border pt-4">
@@ -283,6 +328,13 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
               )}
             </div>
           </div>
+        </div>
+      ) : tab === 'matches' ? (
+        <RankedMatches jobId={job._id} onOpen={(cid) => navigate(`/candidates/${cid}`)} />
+      ) : tab === 'activity' ? (
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <RecordTimeline recordType="job" recordId={job._id} title="Notes & activity" />
+          <RecordTasks recordType="job" recordId={job._id} />
         </div>
       ) : isLoading ? (
         <div className="py-6">

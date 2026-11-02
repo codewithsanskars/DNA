@@ -5,13 +5,61 @@ export type UserRole = 'ADMIN' | 'CLIENT';
 export type CandidateStage =
   | 'APPLIED'
   | 'SCREENING'
+  | 'SUBMITTED'
   | 'INTERVIEW'
   | 'SHORTLISTED'
   | 'OFFER'
   | 'HIRED'
   | 'REJECTED';
 
-export type CandidateSource = 'PORTAL' | 'LINKEDIN';
+export type CandidateSource =
+  | 'PORTAL'
+  | 'LINKEDIN'
+  | 'REFERRAL'
+  | 'JOB_BOARD'
+  | 'WEBSITE'
+  | 'AGENCY'
+  | 'IMPORT'
+  | 'OTHER';
+
+export type WorkAuthorization =
+  | 'CITIZEN'
+  | 'PERMANENT_RESIDENT'
+  | 'H1B'
+  | 'OPT'
+  | 'CPT'
+  | 'TN'
+  | 'L1'
+  | 'EAD'
+  | 'NEEDS_SPONSORSHIP'
+  | 'OTHER';
+
+export type RejectionReason =
+  | 'SKILLS_MISMATCH'
+  | 'EXPERIENCE_LEVEL'
+  | 'COMPENSATION'
+  | 'LOCATION'
+  | 'CULTURE_FIT'
+  | 'POSITION_FILLED'
+  | 'CANDIDATE_WITHDREW'
+  | 'OFFER_DECLINED'
+  | 'NO_RESPONSE'
+  | 'OTHER';
+
+export type NoteKind = 'NOTE' | 'CALL' | 'EMAIL' | 'MEETING' | 'FOLLOW_UP';
+export type RecordType = 'candidate' | 'job' | 'organization';
+
+export type TaskStatus = 'OPEN' | 'DONE';
+export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH';
+export type TaskRecurrence = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+export type InterviewMode = 'VIDEO' | 'PHONE' | 'ONSITE';
+export type InterviewStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+
+export type OfferStatus = 'EXTENDED' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN';
+export type OfferRateType = 'ANNUAL' | 'HOURLY';
+
+export type PlacementStatus = 'ACTIVE' | 'COMPLETED' | 'TERMINATED';
 
 export type GlobalStatus = 'OPEN' | 'SELECTED' | 'ONBOARDED' | 'ARCHIVED';
 

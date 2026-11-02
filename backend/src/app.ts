@@ -51,7 +51,8 @@ app.use(
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 
 // Body parsing
-app.use(express.json());
+// Large enough for a few thousand mapped CSV/Excel import rows.
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 

@@ -1,8 +1,47 @@
-import { candidateRepository } from '../repositories/candidate.repository';
+import {
+  candidateRepository,
+  CandidateSearchParams,
+  DuplicateProbe,
+} from '../repositories/candidate.repository';
 import { jobRepository } from '../repositories/job.repository';
+import { workflowRepository } from '../repositories/workflow.repository';
 import { Candidate } from '../entities/Candidate';
-import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
+import { CandidateStage, GlobalStatus, CandidateStatus, RejectionReason } from '../types';
 import { GLOBAL_STATUSES, STATUS_OPTIONS_BY_GLOBAL_STATUS } from '../entities/enums';
+import { CandidateProfileFields } from '../utils/candidateFields';
+import { badRequest, forbidden, notFound } from '../utils/http';
+
+/** Stages a candidate can be submitted from. */
+const SUBMITTABLE: CandidateStage[] = ['APPLIED', 'SCREENING'];
+
+/** Stages a CLIENT user may move one of their applications into. */
+const CLIENT_STAGES: CandidateStage[] = ['SHORTLISTED', 'INTERVIEW', 'OFFER', 'REJECTED'];
+
+export type BulkAction =
+  | { action: 'addTags'; tags: string[] }
+  | { action: 'removeTags'; tags: string[] }
+  | { action: 'setOwner'; ownerId: string | null }
+  | { action: 'setGlobalStatus'; globalStatus: string; status?: string }
+  | { action: 'linkJob'; jobId: string }
+  | { action: 'delete' };
+
+/** One row of a CSV/Excel import, already mapped to candidate fields by the client. */
+export interface ImportRow extends CandidateProfileFields {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  currentTitle?: string;
+  currentCompany?: string;
+  location?: string;
+  skills?: string[];
+  linkedinUrl?: string;
+  website?: string;
+  notes?: string;
+  noticePeriod?: number | null;
+}
+
+export type DuplicateStrategy = 'skip' | 'update' | 'create';
 
 export const candidateService = {
   // SWFS admin/recruiter view: every candidate across every client.
@@ -38,10 +77,199 @@ export const candidateService = {
     return candidateRepository.updateStageForJob(candidateId, jobId, 'SHORTLISTED');
   },
 
-  rejectCandidate: async (candidateId: string, jobId: string, organizationId: string | null) => {
+  rejectCandidate: async (
+    candidateId: string,
+    jobId: string,
+    organizationId: string | null,
+    rejection?: { reason?: RejectionReason | null; note?: string | null }
+  ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
     if (!candidate) throw new Error('Candidate not found');
-    return candidateRepository.updateStageForJob(candidateId, jobId, 'REJECTED');
+    return candidateRepository.updateStageForJob(candidateId, jobId, 'REJECTED', rejection);
+  },
+
+  /**
+   * Generic stage move — powers the kanban board. Admins may move to any
+   * stage; clients only to the decision stages (shortlist, interview, offer,
+   * reject). Moving to OFFER runs the same "select" flow as the Select button.
+   */
+  setStage: async (
+    candidateId: string,
+    jobId: string,
+    organizationId: string | null,
+    stage: CandidateStage,
+    rejection?: { reason?: RejectionReason | null; note?: string | null }
+  ) => {
+    if (organizationId && !CLIENT_STAGES.includes(stage)) {
+      throw forbidden(`Only SWFS staff can move a candidate to ${stage}`);
+    }
+    const candidate = await candidateService.getCandidateById(candidateId, organizationId);
+    if (!candidate) throw notFound('Candidate not found');
+    const application = await candidateRepository.findApplication(candidateId, jobId);
+    if (!application || (organizationId && application.job.organization?.id !== organizationId)) {
+      throw notFound('Candidate is not linked to this role');
+    }
+    if (stage === 'OFFER') return candidateService.selectCandidateForJob(candidateId, jobId, organizationId);
+    return candidateRepository.updateStageForJob(candidateId, jobId, stage, rejection);
+  },
+
+  /**
+   * SWFS submits a screened candidate to the client (RC-41). Stamps the
+   * submission so "sent → viewed → shortlisted" can be tracked (RC-45).
+   * Admin-only (route-enforced). The kanban routes a drop on Submitted here.
+   */
+  submitToClient: async (candidateId: string, jobId: string, byEmail: string, note: string | null) => {
+    const application = await candidateRepository.findApplication(candidateId, jobId);
+    if (!application) throw notFound('Candidate is not linked to this role');
+    if (!SUBMITTABLE.includes(application.stage) && application.stage !== 'SUBMITTED') {
+      throw badRequest(`A ${application.stage.toLowerCase()} candidate can't be submitted — they're past that stage`);
+    }
+    await candidateRepository.markSubmitted(application.id, byEmail, note);
+    return candidateRepository.findById(candidateId);
+  },
+
+  /** Records a client's first look at a submitted candidate. Returns true if this view was the first. */
+  recordClientView: async (candidateId: string, organizationId: string) =>
+    (await candidateRepository.markClientViewed(candidateId, organizationId)) > 0,
+
+  deleteCandidate: async (candidateId: string) => {
+    const candidate = await candidateRepository.findById(candidateId);
+    if (!candidate) throw notFound('Candidate not found');
+    for (const link of candidate.jobLinks) await jobRepository.incrementCandidateCount(link.jobId, -1);
+    await candidateRepository.delete(candidateId);
+    await workflowRepository.deleteForRecord('candidate', candidateId);
+    return candidate;
+  },
+
+  search: async (params: CandidateSearchParams) => candidateRepository.search(params),
+
+  /** Paged list for the Candidates / Master database screens, with tab counts. */
+  list: async (params: CandidateSearchParams) => {
+    const [page, counts] = await Promise.all([
+      candidateRepository.search(params),
+      candidateRepository.countByGlobalStatus(params),
+    ]);
+    return { ...page, counts };
+  },
+
+  findDuplicates: async (probe: DuplicateProbe, excludeId?: string) => candidateRepository.findDuplicates(probe, excludeId),
+
+  allTags: async () => candidateRepository.allTags(),
+
+  bulk: async (ids: string[], op: BulkAction) => {
+    const unique = [...new Set(ids)];
+    switch (op.action) {
+      case 'addTags':
+        await candidateRepository.addTags(unique, op.tags);
+        break;
+      case 'removeTags':
+        await candidateRepository.removeTags(unique, op.tags);
+        break;
+      case 'setOwner':
+        await candidateRepository.setOwner(unique, op.ownerId);
+        break;
+      case 'setGlobalStatus':
+        for (const id of unique) await candidateService.updateGlobalStatus(id, null, op.globalStatus, op.status);
+        break;
+      case 'linkJob': {
+        const job = await jobRepository.findById(op.jobId);
+        if (!job) throw notFound('Job not found');
+        for (const id of unique) {
+          const c = await candidateRepository.findById(id);
+          if (!c || c.jobLinks.some((l) => l.jobId === op.jobId)) continue;
+          await candidateRepository.addJobLink(id, op.jobId, job.title);
+          await jobRepository.incrementCandidateCount(op.jobId);
+        }
+        break;
+      }
+      case 'delete':
+        for (const id of unique) await candidateService.deleteCandidate(id).catch(() => undefined);
+        break;
+    }
+    return { affected: unique.length };
+  },
+
+  /** Duplicate check for every row of a pending import (RC-78). */
+  previewImport: async (rows: ImportRow[]) => {
+    const out = [];
+    for (const [index, row] of rows.entries()) {
+      const name = splitName(row);
+      const duplicates = await candidateRepository.findDuplicates({
+        email: row.email,
+        phone: row.phone,
+        linkedinUrl: row.linkedinUrl,
+        firstName: name.firstName,
+        lastName: name.lastName,
+      });
+      out.push({ index, valid: !!(name.firstName && name.lastName), duplicates });
+    }
+    return out;
+  },
+
+  /**
+   * Imports mapped rows (RC-76..RC-78). Each row is checked for duplicates
+   * and handled per `strategy`: skip it, merge non-empty values into the
+   * existing record, or create it anyway.
+   */
+  importCandidates: async (rows: ImportRow[], strategy: DuplicateStrategy, jobId?: string) => {
+    const job = jobId ? await jobRepository.findById(jobId) : null;
+    if (jobId && !job) throw notFound('Job not found');
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] as { row: number; error: string }[], ids: [] as string[] };
+
+    for (const [index, raw] of rows.entries()) {
+      try {
+        const { firstName, lastName } = splitName(raw);
+        if (!firstName || !lastName) throw badRequest('First and last name are required');
+        const row = { ...raw, firstName, lastName };
+        const dupes =
+          strategy === 'create'
+            ? []
+            : await candidateRepository.findDuplicates({
+                email: row.email,
+                phone: row.phone,
+                linkedinUrl: row.linkedinUrl,
+                firstName,
+                lastName,
+              });
+
+        if (dupes.length && strategy === 'skip') {
+          result.skipped++;
+          continue;
+        }
+        if (dupes.length && strategy === 'update') {
+          const existing = await candidateRepository.findById(dupes[0]._id);
+          if (!existing) throw new Error('Duplicate vanished during import');
+          const merged: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(row)) {
+            if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) continue;
+            if (k === 'skills' || k === 'tags' || k === 'languages') {
+              const prev = ((existing as Record<string, unknown>)[k] as string[]) || [];
+              merged[k] = [...new Set([...prev, ...(v as string[])])];
+            } else merged[k] = v;
+          }
+          delete merged.source;
+          await candidateRepository.updateDetails(existing._id, merged as Partial<Candidate>);
+          if (job && !existing.jobLinks.some((l) => l.jobId === job._id)) {
+            await candidateRepository.addJobLink(existing._id, job._id, job.title);
+            await jobRepository.incrementCandidateCount(job._id);
+          }
+          result.updated++;
+          result.ids.push(existing._id);
+          continue;
+        }
+        const created = await candidateService.createCandidate(job?._id, {
+          ...row,
+          source: row.source ?? 'IMPORT',
+          currentlyWorking: !!(row.currentTitle || row.currentCompany),
+          noticePeriod: row.noticePeriod ?? undefined,
+        });
+        result.created++;
+        if (created) result.ids.push(created._id);
+      } catch (err) {
+        result.errors.push({ row: index + 1, error: (err as Error).message });
+      }
+    }
+    return result;
   },
 
   requestInterview: async (candidateId: string, jobId: string, organizationId: string | null, _requestData: any) => {
@@ -160,9 +388,9 @@ export const candidateService = {
       linkedinUrl?: string;
       website?: string;
       notes?: string;
-      source?: 'PORTAL' | 'LINKEDIN';
       noticePeriod?: number;
-    }
+      ownerId?: string | null;
+    } & CandidateProfileFields
   ) => {
     let jobLinks: { jobId: string; jobTitle: string; stage: CandidateStage }[] = [];
 
@@ -189,6 +417,18 @@ export const candidateService = {
       notes: data.notes,
       source: data.source ?? 'PORTAL',
       noticePeriod: data.noticePeriod,
+      yearsExperience: data.yearsExperience,
+      education: data.education ?? [],
+      certifications: data.certifications ?? [],
+      employmentHistory: data.employmentHistory ?? [],
+      languages: data.languages ?? [],
+      currentCtc: data.currentCtc,
+      expectedCtc: data.expectedCtc,
+      ctcCurrency: data.ctcCurrency ?? 'USD',
+      availableFrom: data.availableFrom,
+      workAuthorization: data.workAuthorization,
+      tags: data.tags ?? [],
+      owner: data.ownerId ? { id: data.ownerId } : null,
       rawData: {},
     });
   },
@@ -215,7 +455,8 @@ export const candidateService = {
       website?: string;
       notes?: string;
       noticePeriod?: number;
-    }
+      ownerId?: string | null;
+    } & CandidateProfileFields
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
     if (!candidate) throw new Error('Candidate not found');
@@ -233,7 +474,9 @@ export const candidateService = {
     // Not currently working means designation/company no longer apply —
     // clear them (an `undefined` value here is skipped by the update, not
     // written as NULL, so it has to be explicit).
-    const updates: Partial<Candidate> = { ...data };
+    const { ownerId, ...fields } = data;
+    const updates: Partial<Candidate> = { ...(fields as Partial<Candidate>) };
+    if (ownerId !== undefined) updates.owner = ownerId ? ({ id: ownerId } as Candidate['owner']) : null;
     if (data.currentlyWorking === false) {
       updates.currentTitle = null as unknown as undefined;
       updates.currentCompany = null as unknown as undefined;
@@ -340,3 +583,15 @@ export const candidateService = {
     return { candidate: updated, previous };
   },
 };
+
+/** Import rows may carry a single "name" column instead of first/last. */
+function splitName(row: ImportRow & { name?: string }): { firstName: string; lastName: string } {
+  let firstName = row.firstName?.trim() || '';
+  let lastName = row.lastName?.trim() || '';
+  if ((!firstName || !lastName) && row.name?.trim()) {
+    const parts = row.name.trim().split(/\s+/);
+    firstName = firstName || parts[0];
+    lastName = lastName || parts.slice(1).join(' ') || '-';
+  }
+  return { firstName, lastName };
+}

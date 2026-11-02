@@ -8,8 +8,8 @@ import {
   ManyToOne,
   OneToMany,
 } from 'typeorm';
-import { CandidateStage } from '../types';
-import { CANDIDATE_STAGES } from './enums';
+import { CandidateStage, RejectionReason } from '../types';
+import { CANDIDATE_STAGES, REJECTION_REASONS } from './enums';
 import { Candidate } from './Candidate';
 import { Job } from './Job';
 import { InterviewFeedback } from './InterviewFeedback';
@@ -46,6 +46,28 @@ export class Application {
 
   @Column({ type: 'timestamptz', default: () => 'now()' })
   appliedAt!: Date;
+
+  /** When SWFS submitted this candidate to the client (RC-41 / RC-45). */
+  @Column({ type: 'timestamptz', nullable: true })
+  submittedAt?: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  submittedByEmail?: string | null;
+
+  /** The recruiter's pitch sent with the submission — visible to the client. */
+  @Column({ type: 'text', nullable: true })
+  submissionNote?: string | null;
+
+  /** First time a client user opened the candidate after submission. */
+  @Column({ type: 'timestamptz', nullable: true })
+  clientViewedAt?: Date | null;
+
+  /** Why this application was rejected (RC-46) — set alongside stage REJECTED. */
+  @Column({ type: 'enum', enum: REJECTION_REASONS, nullable: true })
+  rejectionReason?: RejectionReason | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejectionNote?: string | null;
 
   @OneToMany(() => InterviewFeedback, (feedback) => feedback.application, { cascade: true })
   interviewFeedback!: InterviewFeedback[];

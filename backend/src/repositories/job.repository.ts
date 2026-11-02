@@ -27,26 +27,54 @@ function toDto(job: Job) {
     payrollType: job.payrollType,
     jdUrl: job.jdUrl ? `/api/jobs/${job.id}/description` : undefined,
     jdFileName: job.jdFileName,
+    // The SWFS recruiter on the role — shown to clients as their point of contact.
+    owner: job.owner ? { id: job.owner.id, name: job.owner.name, email: job.owner.email } : null,
+    createdAt: job.createdAt,
+    aiSummary: job.aiSummary ?? undefined,
+    aiRequirements: job.aiRequirements ?? undefined,
+    aiAnalyzedAt: job.aiAnalyzedAt ?? undefined,
   };
 }
 
+const RELATIONS = ['organization', 'owner'];
+
 export const jobRepository = {
   findAll: async () => {
-    const jobs = await repo().find({ relations: ['organization'], order: { createdAt: 'DESC' } });
+    const jobs = await repo().find({ relations: RELATIONS, order: { createdAt: 'DESC' } });
     return jobs.map(toDto);
   },
 
   findByOrganization: async (organizationId: string) => {
     const jobs = await repo().find({
       where: { organization: { id: organizationId } },
-      relations: ['organization'],
+      relations: RELATIONS,
       order: { createdAt: 'DESC' },
     });
     return jobs.map(toDto);
   },
 
+  /** Paged roles list; organizationId null = every client (admin). */
+  findPage: async (opts: { organizationId: string | null; q?: string; status?: string; page: number; pageSize: number }) => {
+    const qb = repo()
+      .createQueryBuilder('job')
+      .leftJoinAndSelect('job.organization', 'organization')
+      .leftJoinAndSelect('job.owner', 'owner')
+      .orderBy('job.createdAt', 'DESC')
+      .skip((opts.page - 1) * opts.pageSize)
+      .take(opts.pageSize);
+    if (opts.organizationId) qb.andWhere('organization.id = :org', { org: opts.organizationId });
+    if (opts.status) qb.andWhere('job.status = :status', { status: opts.status });
+    if (opts.q) {
+      qb.andWhere('(job.title ILIKE :q OR job.department ILIKE :q OR job.location ILIKE :q OR organization.name ILIKE :q)', {
+        q: `%${opts.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`,
+      });
+    }
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: rows.map(toDto), total, page: opts.page, pageSize: opts.pageSize };
+  },
+
   findById: async (id: string) => {
-    const job = await repo().findOne({ where: { id }, relations: ['organization'] });
+    const job = await repo().findOne({ where: { id }, relations: RELATIONS });
     return job ? toDto(job) : null;
   },
 
@@ -66,8 +94,35 @@ export const jobRepository = {
   },
 
   update: async (id: string, data: any) => {
-    await repo().update(id, data);
+    const { ownerId, ...rest } = data;
+    if (ownerId !== undefined) rest.owner = ownerId ? { id: ownerId } : null;
+    // Drop undefined keys — TypeORM's update() rejects an all-undefined set.
+    for (const k of Object.keys(rest)) if (rest[k] === undefined) delete rest[k];
+    if (Object.keys(rest).length) await repo().update(id, rest);
     return jobRepository.findById(id);
+  },
+
+  setAiAnalysis: async (id: string, data: { aiSummary: string | null; aiRequirements: Record<string, unknown>; }) => {
+    await repo().update(id, { ...data, aiAnalyzedAt: new Date() } as DeepPartial<Job>);
+  },
+
+  /** Recently opened roles, newest first — for the "New openings" widget. */
+  findRecentOpen: async (sinceDays: number, limit = 8) => {
+    const since = new Date(Date.now() - sinceDays * 86400000);
+    const jobs = await repo()
+      .createQueryBuilder('job')
+      .leftJoinAndSelect('job.organization', 'organization')
+      .leftJoinAndSelect('job.owner', 'owner')
+      .where('job.status = :s', { s: 'OPEN' })
+      .andWhere('COALESCE(job."openedAt", job."createdAt") >= :since', { since })
+      .orderBy('COALESCE(job."openedAt", job."createdAt")', 'DESC')
+      .take(limit)
+      .getMany();
+    return jobs.map((j) => ({ ...toDto(j), organizationName: j.organization?.name }));
+  },
+
+  delete: async (id: string) => {
+    await repo().delete(id);
   },
 
   // Returns the on-disk filename + original name for the download route, or

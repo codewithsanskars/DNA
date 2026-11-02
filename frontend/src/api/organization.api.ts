@@ -1,5 +1,11 @@
 import api from './axios';
-import { ApiResponse, CreateOrganizationInput, Organization, ScrapedOrganization } from '../types';
+import {
+  ApiResponse,
+  CreateOrganizationInput,
+  Organization,
+  OrganizationContact,
+  ScrapedOrganization,
+} from '../types';
 
 export const organizationApi = {
   getProfile: async (): Promise<Organization> => {
@@ -25,6 +31,28 @@ export const organizationApi = {
 
   createOrganization: async (input: CreateOrganizationInput): Promise<Organization> => {
     const res = await api.post<ApiResponse<Organization>>('/organization', input);
+    return res.data.data!;
+  },
+
+  // ---- Admin editing ---------------------------------------------------------
+
+  updateOrganization: async (id: string, input: Partial<CreateOrganizationInput>): Promise<Organization> => {
+    const res = await api.patch<ApiResponse<Organization>>(`/organization/${id}`, input);
+    return res.data.data!;
+  },
+
+  addContact: async (orgId: string, contact: OrganizationContact): Promise<Organization> => {
+    const res = await api.post<ApiResponse<Organization>>(`/organization/${orgId}/contacts`, contact);
+    return res.data.data!;
+  },
+
+  updateContact: async (orgId: string, contactId: string, contact: Partial<OrganizationContact>): Promise<Organization> => {
+    const res = await api.patch<ApiResponse<Organization>>(`/organization/${orgId}/contacts/${contactId}`, contact);
+    return res.data.data!;
+  },
+
+  deleteContact: async (orgId: string, contactId: string): Promise<Organization> => {
+    const res = await api.delete<ApiResponse<Organization>>(`/organization/${orgId}/contacts/${contactId}`);
     return res.data.data!;
   },
 };

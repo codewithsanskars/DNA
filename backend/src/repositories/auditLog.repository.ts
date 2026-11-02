@@ -56,6 +56,18 @@ export const auditLogRepository = {
     return logs.map(toDto);
   },
 
+  /** Paged activity; organizationId null = every client (admin). */
+  findPage: async (organizationId: string | null, page: number, pageSize: number) => {
+    const [rows, total] = await repo().findAndCount({
+      where: organizationId ? { organization: { id: organizationId } } : {},
+      relations: ['organization'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+    return { items: rows.map(toDto), total, page, pageSize };
+  },
+
   findByUser: async (userId: string, limit = 50) => {
     const logs = await repo().find({
       where: { userId },

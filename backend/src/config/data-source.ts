@@ -12,6 +12,14 @@ import {
   CandidateFeedback,
   InterviewFeedback,
   AuditLog,
+  RecordNote,
+  Task,
+  Interview,
+  Offer,
+  Placement,
+  SavedSearch,
+  Notification,
+  InterviewScorecard,
 } from '../entities';
 
 const entities = [
@@ -25,6 +33,14 @@ const entities = [
   CandidateFeedback,
   InterviewFeedback,
   AuditLog,
+  RecordNote,
+  Task,
+  Interview,
+  Offer,
+  Placement,
+  SavedSearch,
+  Notification,
+  InterviewScorecard,
 ];
 
 const shared = {

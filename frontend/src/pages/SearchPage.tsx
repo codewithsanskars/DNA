@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/shared/Button';
@@ -11,9 +11,9 @@ import Icon from '../components/shared/Icon';
 import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
-import { useCandidates } from '../hooks/useCandidates';
 import { useToast } from '../components/shared/Toast';
 import { isValidOptionalEmail } from '../utils/validation';
+import TalentSearch from '../components/search/TalentSearch';
 
 const LINKEDIN_PEOPLE_SEARCH = 'https://www.linkedin.com/search/results/people/?keywords=';
 const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -25,13 +25,16 @@ function splitName(full: string) {
   return { first: parts[0], last: parts.slice(1).join(' ') };
 }
 
-export default function SearchPage() {
+function LinkedInSourcing() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
 
   const { data: jobs } = useJobs();
-  const { data: candidates } = useCandidates();
+  const { data: sourcedPage } = useQuery({
+    queryKey: queryKeys.candidateList({ source: 'LINKEDIN', pageSize: 10 }),
+    queryFn: () => candidateApi.list({ source: 'LINKEDIN', pageSize: 10, sort: 'recent' }),
+  });
 
   // --- LinkedIn search launcher ----------------------------------------
   const [keywords, setKeywords] = useState(params.get('q') || '');
@@ -189,12 +192,12 @@ export default function SearchPage() {
 
   // --- Recently sourced -------------------------------------------
   const sourced = useMemo(
-    () => (candidates || []).filter((c) => c.source === 'LINKEDIN').slice().reverse(),
-    [candidates]
+    () => sourcedPage?.items ?? [],
+    [sourcedPage]
   );
 
   return (
-    <AppLayout title="Search">
+    <>
       {/* Search bar */}
       <div className="rounded-lg border border-border bg-card p-5 shadow-xs sm:p-6">
         <form
@@ -430,6 +433,41 @@ export default function SearchPage() {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+/**
+ * Search: the candidate database (boolean + structured filters, saved
+ * searches) and the LinkedIn sourcing workflow. The LinkedIn bookmarklet
+ * lands here with `?url=&name=`, which opens the sourcing tab directly.
+ */
+export default function SearchPage() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'linkedin' || params.has('url') || params.has('name') ? 'linkedin' : 'database';
+  return (
+    <AppLayout title="Search">
+      <div className="mb-5 flex gap-1.5 border-b border-border">
+        {(
+          [
+            ['database', 'Talent database', 'users'],
+            ['linkedin', 'LinkedIn sourcing', 'linkedin'],
+          ] as const
+        ).map(([key, label, icon]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setParams(key === 'linkedin' ? { tab: 'linkedin' } : {}, { replace: true })}
+            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+              tab === key ? 'border-brand text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Icon name={icon} size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'database' ? <TalentSearch /> : <LinkedInSourcing />}
     </AppLayout>
   );
 }

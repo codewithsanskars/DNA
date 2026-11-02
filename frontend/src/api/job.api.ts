@@ -1,9 +1,15 @@
 import api from './axios';
-import { ApiResponse, Job, Candidate, WorkType, PayrollType, JobPriority } from '../types';
+import { ApiResponse, Job, Candidate, WorkType, PayrollType, JobPriority, JobStatus, Paged } from '../types';
 
 export const jobApi = {
   getJobs: async (): Promise<Job[]> => {
     const res = await api.get<ApiResponse<Job[]>>('/jobs');
+    return res.data.data!;
+  },
+
+  /** Paged roles for the Roles table (pickers keep using getJobs). */
+  getJobsPage: async (params: { page: number; pageSize?: number; q?: string; status?: JobStatus }): Promise<Paged<Job>> => {
+    const res = await api.get<ApiResponse<Paged<Job>>>('/jobs', { params });
     return res.data.data!;
   },
 
@@ -31,6 +37,7 @@ export const jobApi = {
     workType?: WorkType;
     payrollType?: PayrollType;
     organizationId?: string;
+    ownerId?: string | null;
   }): Promise<Job> => {
     const res = await api.post<ApiResponse<Job>>('/jobs', data);
     return res.data.data!;
@@ -50,6 +57,7 @@ export const jobApi = {
       billableHours?: string;
       workType?: WorkType;
       payrollType?: PayrollType;
+      ownerId?: string | null;
     }
   ): Promise<Job> => {
     const res = await api.patch<ApiResponse<Job>>(`/jobs/${id}`, data);
@@ -90,5 +98,10 @@ export const jobApi = {
   deleteJobDescription: async (id: string): Promise<Job> => {
     const res = await api.delete<ApiResponse<Job>>(`/jobs/${id}/description`);
     return res.data.data!;
+  },
+
+  /** Admin only — also removes every application on the role. */
+  deleteJob: async (id: string): Promise<void> => {
+    await api.delete(`/jobs/${id}`);
   },
 };

@@ -1,17 +1,19 @@
 import { useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useStaff } from '../hooks/useWorkflow';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
 import { StatusBadge, PriorityBadge } from '../components/shared/Badge';
 import Button from '../components/shared/Button';
 import Modal from '../components/shared/Modal';
 import { Field, Input, Select, Textarea } from '../components/shared/Field';
+import { JdWriterButton } from '../components/ai/AiWidgets';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
 import { TableSkeleton } from '../components/shared/States';
 import Icon from '../components/shared/Icon';
 import JobDetailModal, { JD_ACCEPT } from '../components/jobs/JobDetailModal';
 import { jobApi } from '../api/job.api';
 import { queryKeys } from '../api/queryKeys';
-import { useJobs } from '../hooks/useJobs';
+import Pagination from '../components/shared/Pagination';
 import { useOrganizations } from '../hooks/useOrganizations';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
@@ -19,7 +21,7 @@ import { useToast } from '../components/shared/Toast';
 import { useConfirm } from '../components/shared/Confirm';
 import { formatDate } from '../utils/format';
 import { errorMessage } from '../utils/errors';
-import { Job, WorkType, PayrollType, JobPriority } from '../types';
+import { Job, WorkType, PayrollType, JobPriority, JobStatus } from '../types';
 
 // Matches the backend's numeric(10,2) column limit for payRate/billRate
 // (see job.controller.ts) — caps the input so the browser itself discourages
@@ -68,6 +70,8 @@ export default function JobsPage() {
   const [payrollType, setPayrollType] = useState<PayrollType>('THIRD_PARTY');
   const [priority, setPriority] = useState<JobPriority>('MEDIUM');
   const [clientId, setClientId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
+  const { data: staff = [] } = useStaff();
   // Only relevant while creating a role (it has no id yet, so there's nothing
   // to upload against) — queued locally and uploaded right after the role is
   // created. When editing, the job already has an id, so jdUpload/jdDelete
@@ -75,7 +79,20 @@ export default function JobsPage() {
   const [pendingJdFile, setPendingJdFile] = useState<File | null>(null);
   const jdInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: jobs, isLoading } = useJobs();
+  const [listParams, setListParams] = useState<{ page: number; q: string; status: '' | JobStatus }>({ page: 1, q: '', status: '' });
+  const [qDraft, setQDraft] = useState('');
+  const pageQuery = {
+    page: listParams.page,
+    pageSize: 25,
+    q: listParams.q || undefined,
+    status: listParams.status || undefined,
+  };
+  const { data: jobsPage, isLoading, isFetching } = useQuery({
+    queryKey: queryKeys.jobsPage(pageQuery),
+    queryFn: () => jobApi.getJobsPage(pageQuery),
+    placeholderData: keepPreviousData,
+  });
+  const jobs = jobsPage?.items;
   const { organizations: clients, clientName } = useOrganizations({ enabled: isAdmin });
 
   const resetForm = () => {
@@ -92,6 +109,7 @@ export default function JobsPage() {
     setPayrollType('THIRD_PARTY');
     setPriority('MEDIUM');
     setClientId('');
+    setOwnerId('');
     setPendingJdFile(null);
   };
 
@@ -113,6 +131,7 @@ export default function JobsPage() {
     setPayrollType(job.payrollType || 'THIRD_PARTY');
     setPriority(job.priority || 'MEDIUM');
     setClientId(job.organizationId || '');
+    setOwnerId(job.owner?.id || '');
     setSelectedJob(null);
     setShowForm(true);
   };
@@ -223,6 +242,7 @@ export default function JobsPage() {
         workType,
         payrollType,
         priority,
+        ownerId: isAdmin ? ownerId || null : undefined,
       });
       return;
     }
@@ -239,10 +259,11 @@ export default function JobsPage() {
       payrollType,
       priority,
       organizationId: isAdmin ? clientId : undefined,
+      ownerId: isAdmin ? ownerId || undefined : undefined,
     });
   };
 
-  const jobCount = jobs?.length ?? 0;
+  const jobCount = jobsPage?.total ?? 0;
 
   return (
     <AppLayout
@@ -317,16 +338,29 @@ export default function JobsPage() {
               </Field>
             </div>
 
-            <Field label="Description">
-              {(id) => (
-                <Textarea
-                  id={id}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What will this person be doing?"
+            <div>
+              <div className="-mb-1 flex justify-end">
+                <JdWriterButton
+                  title={title}
+                  department={department}
+                  location={location}
+                  workType={workType}
+                  existing={description}
+                  onWrite={setDescription}
                 />
-              )}
-            </Field>
+              </div>
+              <Field label="Description">
+                {(id) => (
+                  <Textarea
+                    id={id}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="What will this person be doing?"
+                    rows={description.length > 300 ? 12 : 3}
+                  />
+                )}
+              </Field>
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               {isAdmin && (
@@ -402,6 +436,21 @@ export default function JobsPage() {
                 )}
               </Field>
             </div>
+
+            {isAdmin && (
+              <Field label="Recruiter (owner)" hint="Defaults to you; shown to the client as their contact">
+                {(id) => (
+                  <Select id={id} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+                    <option value="">{isEditing ? 'Unassigned' : 'Me'}</option>
+                    {staff.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            )}
 
             <Field label="Priority" hint="How urgently this role needs to be filled">
               {(id) => (
@@ -550,6 +599,36 @@ export default function JobsPage() {
         <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onEdit={openEditForm} />
       )}
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <form
+          className="relative w-full max-w-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setListParams((p) => ({ ...p, q: qDraft.trim(), page: 1 }));
+          }}
+        >
+          <Icon name="search" size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle-foreground" />
+          <Input
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
+            placeholder={isAdmin ? 'Search title, department, location, client…' : 'Search title, department, location…'}
+            className="!h-8 !pl-8 !text-xs"
+            aria-label="Search roles"
+          />
+        </form>
+        <Select
+          value={listParams.status}
+          onChange={(e) => setListParams((p) => ({ ...p, status: e.target.value as '' | JobStatus, page: 1 }))}
+          className="!h-8 !w-40 !text-xs"
+          aria-label="Status"
+        >
+          <option value="">All statuses</option>
+          <option value="OPEN">Open</option>
+          <option value="ON_HOLD">On hold</option>
+          <option value="CLOSED">Closed</option>
+        </Select>
+      </div>
+
       {isLoading ? (
         <TableSkeleton cols={isAdmin ? 6 : 5} />
       ) : (
@@ -583,11 +662,23 @@ export default function JobsPage() {
                 </Td>
               </Tr>
             ))}
-            {(!jobs || jobs.length === 0) && (
+            {(!jobs || jobs.length === 0) && (listParams.q || listParams.status) && (
+              <EmptyRow colSpan={isAdmin ? 7 : 6}>No roles match these filters.</EmptyRow>
+            )}
+            {(!jobs || jobs.length === 0) && !listParams.q && !listParams.status && (
               <EmptyRow colSpan={isAdmin ? 7 : 6}>No roles have been posted yet.</EmptyRow>
             )}
           </tbody>
         </TableShell>
+      )}
+      {jobsPage && (
+        <Pagination
+          className={`mt-3 ${isFetching ? 'opacity-70' : ''}`}
+          page={jobsPage.page}
+          pageSize={jobsPage.pageSize}
+          total={jobsPage.total}
+          onPage={(page) => setListParams((p) => ({ ...p, page }))}
+        />
       )}
     </AppLayout>
   );

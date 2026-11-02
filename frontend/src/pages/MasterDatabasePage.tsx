@@ -1,43 +1,69 @@
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
 import Badge, { StageBadge, GlobalStatusBadge, CandidateStatusBadge } from '../components/shared/Badge';
 import Avatar from '../components/shared/Avatar';
 import Icon from '../components/shared/Icon';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
 import { TableSkeleton } from '../components/shared/States';
-import { useCandidates } from '../hooks/useCandidates';
-import { Candidate, ArchivedCandidateStatus } from '../types';
+import { Input } from '../components/shared/Field';
+import Pagination from '../components/shared/Pagination';
+import { candidateApi } from '../api/candidate.api';
+import { queryKeys } from '../api/queryKeys';
+import { Candidate } from '../types';
 
-// Archived candidates still worth resurfacing — everyone else archived
-// (blacklisted, offboarded) has no place in the pool of reachable candidates.
-const REACHABLE_ARCHIVED_STATUSES: ArchivedCandidateStatus[] = ['OPPORTUNITY', 'CONTACTED', 'NOT_INTERESTED'];
-
-function isInMasterDatabase(c: Candidate) {
-  if (c.globalStatus === 'OPEN') return true;
-  if (c.globalStatus === 'ARCHIVED') {
-    return REACHABLE_ARCHIVED_STATUSES.includes(c.status as ArchivedCandidateStatus);
-  }
-  return false;
-}
+// The pool (OPEN, plus ARCHIVED as Opportunity / Contacted / Not interested)
+// is filtered server-side — see `masterPool` in candidate.repository.ts.
+const PAGE_SIZE = 25;
 
 export default function MasterDatabasePage() {
   const navigate = useNavigate();
-  const { data: candidates, isLoading } = useCandidates();
+  const [params, setParams] = useSearchParams();
+  const page = Math.max(1, Number(params.get('page')) || 1);
+  const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useState(q);
+  const listParams = { masterPool: true, q: q || undefined, page, pageSize: PAGE_SIZE };
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: queryKeys.candidateList(listParams),
+    queryFn: () => candidateApi.list(listParams),
+    placeholderData: keepPreviousData,
+  });
+  const setParam = (k: string, v: string | null) => {
+    const next = new URLSearchParams(params);
+    if (v) next.set(k, v);
+    else next.delete(k);
+    if (k !== 'page') next.delete('page');
+    setParams(next, { replace: true });
+  };
 
   const clientNames = (c: Candidate) => {
     const names = Array.from(new Set(c.jobLinks.map((l) => l.organizationName).filter(Boolean)));
     return names.length ? names.join(', ') : '—';
   };
 
-  const filtered = (candidates || []).filter(isInMasterDatabase);
+  const filtered = data?.items ?? [];
 
   return (
     <AppLayout
       title="Master Database"
     >
+      <form
+        className="mb-3 flex max-w-md gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setParam('q', qDraft.trim() || null);
+        }}
+      >
+        <div className="relative flex-1">
+          <Icon name="search" size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle-foreground" />
+          <Input value={qDraft} onChange={(e) => setQDraft(e.target.value)} placeholder="Search the pool…" className="!h-8 !pl-8 !text-xs" aria-label="Search" />
+        </div>
+      </form>
       {isLoading ? (
         <TableSkeleton cols={7} />
       ) : (
+        <div className={isFetching ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <TableShell>
           <Thead>
             <tr>
@@ -98,9 +124,13 @@ export default function MasterDatabasePage() {
                 </Td>
               </Tr>
             ))}
-            {filtered.length === 0 && <EmptyRow colSpan={7}>No candidates in the master database yet.</EmptyRow>}
+            {filtered.length === 0 && (
+              <EmptyRow colSpan={7}>{q ? `No one in the pool matches “${q}”.` : 'No candidates in the master database yet.'}</EmptyRow>
+            )}
           </tbody>
         </TableShell>
+        {data && <Pagination className="mt-3" page={data.page} pageSize={data.pageSize} total={data.total} onPage={(n) => setParam('page', n === 1 ? null : String(n))} />}
+        </div>
       )}
     </AppLayout>
   );

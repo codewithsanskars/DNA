@@ -4,9 +4,11 @@ import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { jobService } from '../services/job.service';
 import { candidateService } from '../services/candidate.service';
+import { matchService } from '../services/match.service';
 import { auditLogService } from '../services/auditLog.service';
 import { organizationRepository } from '../repositories/organization.repository';
 import { isAdminRole } from '../utils/roles';
+import { optionalUuid } from '../utils/http';
 import { JOB_DESCRIPTION_DIR } from '../middleware/upload.middleware';
 import { JOB_STATUSES, JOB_PRIORITIES, WORK_TYPES, PAYROLL_TYPES } from '../entities/enums';
 
@@ -73,6 +75,17 @@ export const jobController = {
   getJobs: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const isAdmin = isAdminRole(req.user!.role);
+      // ?page= switches to a paged response for the Roles table; without it the
+      // full list is returned (role pickers / dropdowns).
+      if (req.query.page !== undefined) {
+        const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(String(req.query.pageSize ?? '25'), 10) || 25));
+        const status = JOB_STATUSES.includes(req.query.status as never) ? String(req.query.status) : undefined;
+        const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim().slice(0, 200) : undefined;
+        const result = await jobService.getJobsPage({ organizationId: isAdmin ? null : req.user!.organizationId, q, status, page, pageSize });
+        res.json({ success: true, data: { ...result, items: result.items.map((job) => scopeJobForRole(job, isAdmin)) } });
+        return;
+      }
       const data = isAdmin ? await jobService.getAllJobs() : await jobService.getJobsForOrganization(req.user!.organizationId);
       res.json({ success: true, data: data.map((job) => scopeJobForRole(job, isAdmin)) });
     } catch (err) {
@@ -150,8 +163,11 @@ export const jobController = {
         billableHours,
         workType,
         payrollType,
+        // Owner defaults to the SWFS recruiter creating the role; clients can't set it.
+        ownerId: isAdmin ? optionalUuid(req.body.ownerId, 'Owner') ?? req.user!.userId : undefined,
       });
       await auditLogService.log(req.user!, 'CREATE_JOB', 'job', job._id, { title, organizationId: targetOrgId });
+      matchService.analyzeInBackground(job._id);
       res.status(201).json({ success: true, data: scopeJobForRole(job, isAdmin) });
     } catch (err) {
       next(err);
@@ -182,8 +198,10 @@ export const jobController = {
         billableHours,
         workType,
         payrollType,
+        ownerId: isAdmin ? optionalUuid(req.body.ownerId, 'Owner') : undefined,
       });
       await auditLogService.log(req.user!, 'UPDATE_JOB', 'job', req.params.id, req.body);
+      if (['title', 'description', 'location', 'workType'].some((k) => k in (req.body || {}))) matchService.analyzeInBackground(req.params.id);
       res.json({ success: true, data: scopeJobForRole(job, isAdmin) });
     } catch (err) {
       next(err);
@@ -204,6 +222,7 @@ export const jobController = {
         req.file.originalname
       );
       if (previous) fs.unlink(path.join(JOB_DESCRIPTION_DIR, previous.storedName), () => {});
+      matchService.analyzeInBackground(req.params.id);
       await auditLogService.log(req.user!, 'UPLOAD_JOB_DESCRIPTION', 'job', req.params.id, {
         fileName: req.file.originalname,
       });
@@ -239,7 +258,21 @@ export const jobController = {
       const { job, previous } = await jobService.deleteDescriptionFile(req.params.id, orgScope);
       if (previous) fs.unlink(path.join(JOB_DESCRIPTION_DIR, previous.storedName), () => {});
       await auditLogService.log(req.user!, 'DELETE_JOB_DESCRIPTION', 'job', req.params.id, {});
+      matchService.analyzeInBackground(req.params.id);
       res.json({ success: true, data: job });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deleteJob: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      // Look up the stored JD before the row (and its filename) is gone.
+      const stored = await jobService.getDescriptionFile(req.params.id, null);
+      const job = await jobService.deleteJob(req.params.id);
+      if (stored) fs.unlink(path.join(JOB_DESCRIPTION_DIR, stored.storedName), () => {});
+      await auditLogService.log(req.user!, 'DELETE_JOB', 'job', req.params.id, { title: job.title, organizationId: job.organizationId });
+      res.json({ success: true, data: { id: req.params.id } });
     } catch (err) {
       next(err);
     }

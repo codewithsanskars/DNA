@@ -1,4 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import Pagination from '../components/shared/Pagination';
 import AppLayout from '../components/layout/AppLayout';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
 import { TableSkeleton } from '../components/shared/States';
@@ -15,10 +17,13 @@ const ACTION_ICONS: Record<string, IconName> = {
 };
 
 export default function ActivityPage() {
-  const { data: logs, isLoading } = useQuery({
-    queryKey: queryKeys.activity,
-    queryFn: () => activityApi.getActivity(100),
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.activityPage(page),
+    queryFn: () => activityApi.getActivityPage(page, 50),
+    placeholderData: keepPreviousData,
   });
+  const logs = data?.items;
 
   return (
     <AppLayout title="Activity Log">
@@ -62,6 +67,7 @@ export default function ActivityPage() {
           </tbody>
         </TableShell>
       )}
+      {data && <Pagination className="mt-3" page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
     </AppLayout>
   );
 }

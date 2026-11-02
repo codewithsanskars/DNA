@@ -11,5 +11,10 @@ router.get('/list', authenticate, organizationController.getOrganizations);
 router.post('/scrape', authenticate, requireRole('ADMIN'), organizationController.scrapeCompanyPage);
 router.post('/', authenticate, requireRole('ADMIN'), organizationController.createOrganization);
 router.get('/:id', authenticate, organizationController.getOrganization);
+router.get('/:id/pdf', authenticate, organizationController.downloadPdf);
+router.patch('/:id', authenticate, requireRole('ADMIN'), organizationController.updateOrganization);
+router.post('/:id/contacts', authenticate, requireRole('ADMIN'), organizationController.addContact);
+router.patch('/:id/contacts/:contactId', authenticate, requireRole('ADMIN'), organizationController.updateContact);
+router.delete('/:id/contacts/:contactId', authenticate, requireRole('ADMIN'), organizationController.deleteContact);
 
 export default router;

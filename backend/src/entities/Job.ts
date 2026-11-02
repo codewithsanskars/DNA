@@ -12,6 +12,7 @@ import { JobStatus, JobPriority, WorkType, PayrollType } from '../types';
 import { JOB_STATUSES, JOB_PRIORITIES, WORK_TYPES, PAYROLL_TYPES } from './enums';
 import { Organization } from './Organization';
 import { Application } from './Application';
+import { User } from './User';
 
 /** An open (or closed) role a client is hiring for. */
 @Entity('jobs')
@@ -77,12 +78,28 @@ export class Job {
   @Column({ nullable: true })
   jdFileName?: string;
 
+  /** The SWFS recruiter who owns delivery on this role. */
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  owner?: User | null;
+
   /** Denormalised counter — number of applications linked to this job. */
   @Column({ type: 'int', default: 0 })
   totalCandidates!: number;
 
   @OneToMany(() => Application, (application) => application.job)
   applications!: Application[];
+
+  // ---- AI analysis of the role (see services/match.service.ts) -------------
+  /** Two-sentence AI summary of the opening. */
+  @Column({ type: 'text', nullable: true })
+  aiSummary?: string | null;
+
+  /** Structured requirements extracted from the JD; drives the match % everywhere. */
+  @Column({ type: 'jsonb', nullable: true })
+  aiRequirements?: Record<string, unknown> | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  aiAnalyzedAt?: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

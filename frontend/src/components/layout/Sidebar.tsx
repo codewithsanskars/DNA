@@ -5,9 +5,12 @@ import Icon, { IconName } from '../shared/Icon';
 import IconButton from '../shared/IconButton';
 import Avatar from '../shared/Avatar';
 import { useThemedLogo } from '../../utils/logo';
+import { useTaskSummary } from '../../hooks/useWorkflow';
 
-const NAV: { to: string; label: string; icon: IconName; adminOnly?: boolean }[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+const NAV: { to: string; label: string; clientLabel?: string; icon: IconName; adminOnly?: boolean }[] = [
+  { to: '/dashboard', label: 'Dashboard', clientLabel: 'Home', icon: 'dashboard' },
+  // A recruiter's tasks, mentions and upcoming interviews — SWFS-staff only.
+  { to: '/my-work', label: 'My Work', icon: 'check-square', adminOnly: true },
   { to: '/jobs', label: 'Open Roles', icon: 'briefcase' },
   { to: '/candidates', label: 'Candidates', icon: 'users' },
   // A consolidated pool of reachable candidates (Open + re-engageable
@@ -35,6 +38,8 @@ function SidebarContent({ rail = false, onNavigate, onToggleCollapse }: SidebarC
   const admin = isAdminRole(user?.role);
   const avatarName = user?.name || user?.email;
   const swfsLogo = useThemedLogo();
+  const { data: taskSummary } = useTaskSummary();
+  const urgent = (taskSummary?.overdue ?? 0) + (taskSummary?.dueToday ?? 0);
 
   return (
     <div
@@ -82,7 +87,7 @@ function SidebarContent({ rail = false, onNavigate, onToggleCollapse }: SidebarC
             key={item.to}
             to={item.to}
             onClick={onNavigate}
-            title={rail ? item.label : undefined}
+            title={rail ? (admin ? item.label : item.clientLabel ?? item.label) : undefined}
             className={({ isActive }) =>
               `group relative flex items-center rounded-md text-[13px] font-medium transition-colors ${
                 rail ? 'mx-auto h-10 w-10 justify-center' : 'gap-3 px-3 py-2'
@@ -99,7 +104,15 @@ function SidebarContent({ rail = false, onNavigate, onToggleCollapse }: SidebarC
                   <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand" />
                 )}
                 <Icon name={item.icon} size={rail ? 18 : 17} className={isActive ? '' : 'opacity-80'} />
-                {!rail && item.label}
+                {!rail && (admin ? item.label : item.clientLabel ?? item.label)}
+                {item.to === '/my-work' && urgent > 0 && (
+                  <span
+                    className={`rounded-full bg-brand px-1.5 text-2xs font-semibold leading-4 text-white ${rail ? 'absolute right-0.5 top-0.5' : 'ml-auto'}`}
+                    aria-label={`${urgent} tasks due`}
+                  >
+                    {urgent}
+                  </span>
+                )}
               </>
             )}
           </NavLink>

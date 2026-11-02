@@ -14,6 +14,7 @@ import { organizationApi } from '../api/organization.api';
 import { queryKeys } from '../api/queryKeys';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
+import { pdfApi } from '../api/pdf.api';
 import { useToast } from '../components/shared/Toast';
 import { OrganizationSocialLinks } from '../types';
 import { errorMessage } from '../utils/errors';
@@ -131,6 +132,16 @@ export default function OrganizationPage() {
           <div className="ml-auto">
             <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
               New organization
+            </Button>
+          </div>
+        ) : user?.organizationId ? (
+          <div className="ml-auto">
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={() => pdfApi.organization(user.organizationId!).catch(() => toast.error('Couldn’t generate the PDF', 'Please try again.'))}
+            >
+              Download profile PDF
             </Button>
           </div>
         ) : undefined

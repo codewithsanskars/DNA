@@ -1,8 +1,9 @@
-import { In, DeepPartial } from 'typeorm';
+import { In, DeepPartial, SelectQueryBuilder } from 'typeorm';
 import { AppDataSource } from '../config/data-source';
 import { Candidate, Application, CandidateFeedback, InterviewFeedback } from '../entities';
 import { CANDIDATE_STAGES } from '../entities/enums';
-import { CandidateStage, GlobalStatus, CandidateStatus } from '../types';
+import { CandidateStage, GlobalStatus, CandidateStatus, RejectionReason } from '../types';
+import { buildBooleanSearch } from '../utils/booleanSearch';
 
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
@@ -15,7 +16,12 @@ const RELATIONS = [
   'applications.job.organization',
   'applications.interviewFeedback',
   'feedback',
+  'owner',
 ];
+
+const num = (v: unknown) => (v == null ? undefined : Number(v));
+const userRef = (u?: { id: string; name: string; email: string } | null) =>
+  u ? { id: u.id, name: u.name, email: u.email } : null;
 
 function toDto(c: Candidate) {
   return {
@@ -44,8 +50,31 @@ function toDto(c: Candidate) {
     source: c.source,
     globalStatus: c.globalStatus,
     status: c.status,
+    yearsExperience: num(c.yearsExperience),
+    education: c.education ?? [],
+    certifications: c.certifications ?? [],
+    employmentHistory: c.employmentHistory ?? [],
+    languages: c.languages ?? [],
+    currentCtc: num(c.currentCtc),
+    expectedCtc: num(c.expectedCtc),
+    ctcCurrency: c.ctcCurrency,
+    availableFrom: c.availableFrom ?? undefined,
+    workAuthorization: c.workAuthorization ?? undefined,
+    tags: c.tags ?? [],
+    owner: userRef(c.owner),
+    lastContactedAt: c.lastContactedAt ?? undefined,
+    createdAt: c.createdAt,
     syncedAt: c.updatedAt,
     jobLinks: (c.applications || []).map((a) => ({
+      applicationId: a.id,
+      appliedAt: a.appliedAt,
+      stageUpdatedAt: a.stageUpdatedAt,
+      rejectionReason: a.rejectionReason ?? undefined,
+      submittedAt: a.submittedAt ?? undefined,
+      submittedByEmail: a.submittedByEmail ?? undefined,
+      submissionNote: a.submissionNote ?? undefined,
+      clientViewedAt: a.clientViewedAt ?? undefined,
+      rejectionNote: a.rejectionNote ?? undefined,
       jobId: a.job.id,
       jobTitle: a.job.title,
       stage: a.stage,
@@ -165,11 +194,22 @@ export const candidateRepository = {
     return candidateRepository.findById(id);
   },
 
-  updateStageForJob: async (id: string, jobId: string, stage: CandidateStage) => {
+  updateStageForJob: async (
+    id: string,
+    jobId: string,
+    stage: CandidateStage,
+    rejection?: { reason?: RejectionReason | null; note?: string | null }
+  ) => {
     await appRepo()
       .createQueryBuilder()
       .update(Application)
-      .set({ stage, stageUpdatedAt: new Date() })
+      .set({
+        stage,
+        stageUpdatedAt: new Date(),
+        // Leaving REJECTED clears the old reason; entering it records the new one.
+        rejectionReason: stage === 'REJECTED' ? rejection?.reason ?? null : null,
+        rejectionNote: stage === 'REJECTED' ? rejection?.note ?? null : null,
+      })
       .where('candidateId = :id AND jobId = :jobId', { id, jobId })
       .execute();
     return candidateRepository.findById(id);
@@ -310,6 +350,238 @@ export const candidateRepository = {
     return candidateRepository.findById(id);
   },
 
+  findApplication: async (candidateId: string, jobId: string) => {
+    return appRepo().findOne({
+      where: { candidate: { id: candidateId }, job: { id: jobId } },
+      relations: ['job', 'job.organization'],
+    });
+  },
+
+  /** Moves an application to SUBMITTED and stamps who/when/why. */
+  markSubmitted: async (applicationId: string, byEmail: string, note: string | null) => {
+    await appRepo().update(applicationId, {
+      stage: 'SUBMITTED',
+      stageUpdatedAt: new Date(),
+      submittedAt: new Date(),
+      submittedByEmail: byEmail,
+      submissionNote: note,
+      // A re-submission should be seen again.
+      clientViewedAt: null,
+      rejectionReason: null,
+      rejectionNote: null,
+    });
+  },
+
+  /**
+   * Stamps the first client view on this candidate's submitted, not-yet-viewed
+   * applications for that client's roles. Returns how many were stamped.
+   */
+  markClientViewed: async (candidateId: string, organizationId: string) => {
+    const result = await AppDataSource.query(
+      `UPDATE applications a SET "clientViewedAt" = now()
+         FROM jobs j
+        WHERE a."jobId" = j.id AND j."organizationId" = $2 AND a."candidateId" = $1
+          AND a."submittedAt" IS NOT NULL AND a."clientViewedAt" IS NULL`,
+      [candidateId, organizationId]
+    );
+    return Array.isArray(result) ? Number(result[1] ?? 0) : 0;
+  },
+
+  findApplicationById: async (applicationId: string) => {
+    return appRepo().findOne({
+      where: { id: applicationId },
+      relations: ['candidate', 'job', 'job.organization'],
+    });
+  },
+
+  delete: async (id: string) => {
+    await repo().delete(id);
+  },
+
+  touchLastContacted: async (id: string, at: Date) => {
+    await repo()
+      .createQueryBuilder()
+      .update(Candidate)
+      .set({ lastContactedAt: at })
+      .where('id = :id AND ("lastContactedAt" IS NULL OR "lastContactedAt" < :at)', { id, at })
+      .execute();
+  },
+
+  setOwner: async (ids: string[], ownerId: string | null) => {
+    if (!ids.length) return;
+    await repo()
+      .createQueryBuilder()
+      .update(Candidate)
+      .set({ owner: ownerId ? ({ id: ownerId } as any) : null })
+      .whereInIds(ids)
+      .execute();
+  },
+
+  addTags: async (ids: string[], tags: string[]) => {
+    if (!ids.length || !tags.length) return;
+    // ARRAY(SELECT DISTINCT ...) keeps the column de-duplicated.
+    await AppDataSource.query(
+      `UPDATE candidates SET tags = ARRAY(SELECT DISTINCT unnest(tags || $2::text[])) WHERE id = ANY($1::uuid[])`,
+      [ids, tags]
+    );
+  },
+
+  removeTags: async (ids: string[], tags: string[]) => {
+    if (!ids.length || !tags.length) return;
+    await AppDataSource.query(
+      `UPDATE candidates SET tags = ARRAY(SELECT t FROM unnest(tags) t WHERE lower(t) <> ALL(SELECT lower(x) FROM unnest($2::text[]) x)) WHERE id = ANY($1::uuid[])`,
+      [ids, tags]
+    );
+  },
+
+  allTags: async () => {
+    const rows: { tag: string; count: string }[] = await AppDataSource.query(
+      `SELECT t AS tag, COUNT(*) AS count FROM candidates, unnest(tags) t GROUP BY t ORDER BY COUNT(*) DESC, t ASC LIMIT 500`
+    );
+    return rows.map((r) => ({ tag: r.tag, count: Number(r.count) }));
+  },
+
+  /**
+   * Possible duplicates of a (new or imported) candidate: an exact email,
+   * phone (last 10 digits) or LinkedIn match, or the same first + last name.
+   */
+  findDuplicates: async (probe: DuplicateProbe, excludeId?: string) => {
+    const email = probe.email?.trim().toLowerCase() || null;
+    const phone = digitsOf(probe.phone);
+    const li = normalizeLinkedin(probe.linkedinUrl);
+    const fn = probe.firstName?.trim().toLowerCase() || null;
+    const ln = probe.lastName?.trim().toLowerCase() || null;
+
+    const or: string[] = [];
+    if (email) or.push('lower(c.email) = :email');
+    if (phone) or.push(`right(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g'), 10) = :phone`);
+    if (li) or.push(`lower(rtrim(regexp_replace(coalesce(c."linkedinUrl", ''), '^https?://(www[.])?', ''), '/')) = :li`);
+    if (fn && ln) or.push('(lower(c."firstName") = :fn AND lower(c."lastName") = :ln)');
+    if (!or.length) return [];
+
+    const qb = repo()
+      .createQueryBuilder('c')
+      .where(`(${or.join(' OR ')})`, { email, phone, li, fn, ln });
+    if (excludeId) qb.andWhere('c.id != :excludeId', { excludeId });
+    const rows = await qb.take(10).getMany();
+
+    return rows.map((c) => ({
+      _id: c.id,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      email: c.email,
+      phone: c.phone,
+      linkedinUrl: c.linkedinUrl,
+      currentTitle: c.currentTitle,
+      currentCompany: c.currentCompany,
+      globalStatus: c.globalStatus,
+      matchedOn: [
+        email && c.email?.toLowerCase() === email ? 'email' : null,
+        phone && digitsOf(c.phone) === phone ? 'phone' : null,
+        li && normalizeLinkedin(c.linkedinUrl) === li ? 'linkedin' : null,
+        fn && ln && c.firstName.toLowerCase() === fn && c.lastName.toLowerCase() === ln ? 'name' : null,
+      ].filter((m): m is string => !!m),
+    }));
+  },
+
+  /** Server-side filtered + paginated candidate search (RC-21..RC-23, F-4). */
+  /**
+   * Lightweight rows for in-memory match scoring: only the fields the scorer
+   * reads, no relations. Capped so a huge pool can't exhaust memory.
+   */
+  findMatchPool: async (params: CandidateSearchParams, cap = 5000) => {
+    const qb = repo().createQueryBuilder('c');
+    applySearchFilters(qb, params);
+    const rows = await qb
+      .select(['c.id', 'c.currentTitle', 'c.location', 'c.skills', 'c.yearsExperience', 'c.employmentHistory'])
+      .orderBy('c.updatedAt', 'DESC')
+      .take(cap)
+      .getMany();
+    return rows.map((c) => ({
+      id: c.id,
+      currentTitle: c.currentTitle,
+      location: c.location,
+      skills: c.skills ?? [],
+      yearsExperience: c.yearsExperience != null ? Number(c.yearsExperience) : undefined,
+      employmentHistory: c.employmentHistory ?? [],
+    }));
+  },
+
+  /** IDs of candidates already linked to a role (excluded from "matches in the pool"). */
+  linkedCandidateIds: async (jobId: string) => {
+    const rows = await appRepo()
+      .createQueryBuilder('a')
+      .select('a."candidateId"', 'id')
+      .where('a."jobId" = :jobId', { jobId })
+      .getRawMany<{ id: string }>();
+    return new Set(rows.map((r) => r.id));
+  },
+
+  /** Every distinct skill in the database — the no-LLM fallback vocabulary for reading a JD. */
+  skillVocabulary: async () => {
+    const rows = await AppDataSource.query(`SELECT DISTINCT lower(trim(s)) AS s FROM candidates, unnest(skills) AS s WHERE length(trim(s)) > 1`);
+    return (rows as { s: string }[]).map((r) => r.s);
+  },
+
+  /** Full DTOs for the given IDs, in the given order. */
+  findManyOrdered: async (ids: string[]) => {
+    if (!ids.length) return [];
+    const full = await repo().find({ where: { id: In(ids) }, relations: RELATIONS });
+    const byId = new Map(full.map((c) => [c.id, c]));
+    return ids.map((id) => byId.get(id)).filter((c): c is Candidate => !!c).map(toDto);
+  },
+
+  search: async (params: CandidateSearchParams) => {
+    const qb = repo().createQueryBuilder('c');
+    applySearchFilters(qb, params);
+
+    const sortMap: Record<string, [string, 'ASC' | 'DESC', 'NULLS FIRST' | 'NULLS LAST']> = {
+      recent: ['c.createdAt', 'DESC', 'NULLS LAST'],
+      updated: ['c.updatedAt', 'DESC', 'NULLS LAST'],
+      name: ['c.firstName', 'ASC', 'NULLS LAST'],
+      experience: ['c.yearsExperience', 'DESC', 'NULLS LAST'],
+      lastContacted: ['c.lastContactedAt', 'ASC', 'NULLS FIRST'],
+      available: ['c.availableFrom', 'ASC', 'NULLS LAST'],
+    };
+    const [col, dir, nulls] = sortMap[params.sort ?? 'recent'] ?? sortMap.recent;
+    qb.orderBy(col, dir, nulls).addOrderBy('c.id', 'ASC');
+
+    const pageSize = Math.min(Math.max(params.pageSize ?? 25, 1), 200);
+    const page = Math.max(params.page ?? 1, 1);
+    const [rows, total] = await qb
+      .select(['c.id'])
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount();
+
+    const ids = rows.map((r) => r.id);
+    const full = ids.length ? await repo().find({ where: { id: In(ids) }, relations: RELATIONS }) : [];
+    const byId = new Map(full.map((c) => [c.id, c]));
+    return {
+      items: ids
+        .map((id) => byId.get(id))
+        .filter((c): c is Candidate => !!c)
+        .map(toDto),
+      total,
+      page,
+      pageSize,
+    };
+  },
+
+  /** Totals per global status for the same filters (tab badges), ignoring the status filter itself. */
+  countByGlobalStatus: async (params: CandidateSearchParams) => {
+    const qb = repo().createQueryBuilder('c');
+    applySearchFilters(qb, { ...params, globalStatus: undefined });
+    const rows = await qb
+      .select('c."globalStatus"', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('c."globalStatus"')
+      .getRawMany<{ status: string; count: string }>();
+    const out: Record<string, number> = { OPEN: 0, SELECTED: 0, ONBOARDED: 0, ARCHIVED: 0 };
+    for (const r of rows) out[r.status] = Number(r.count);
+    return out;
+  },
+
   // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
   countByStage: async (organizationId: string | null) => {
     const counts: Record<string, number> = {};
@@ -328,3 +600,123 @@ export const candidateRepository = {
     return counts;
   },
 };
+
+export interface DuplicateProbe {
+  email?: string;
+  phone?: string;
+  linkedinUrl?: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface CandidateSearchParams {
+  q?: string;
+  skills?: string[];
+  title?: string;
+  company?: string;
+  location?: string;
+  education?: string;
+  minExperience?: number;
+  maxExperience?: number;
+  maxExpectedCtc?: number;
+  maxNoticePeriod?: number;
+  availableBy?: string;
+  workAuthorization?: string[];
+  globalStatus?: string[];
+  source?: string[];
+  tags?: string[];
+  ownerId?: string;
+  jobId?: string;
+  stage?: string[];
+  /** Restrict to candidates linked to this client org's roles (CLIENT callers). */
+  organizationId?: string;
+  /** Search only fields a client can see (no tags). */
+  clientSafe?: boolean;
+  /** The reachable pool: OPEN, plus ARCHIVED with a re-engageable sub-status. */
+  masterPool?: boolean;
+  page?: number;
+  pageSize?: number;
+  sort?: string;
+}
+
+/** Last 10 digits of a phone number, or null if it's too short to compare. */
+function digitsOf(phone?: string | null): string | null {
+  const d = (phone || '').replace(/[^0-9]/g, '');
+  return d.length >= 7 ? d.slice(-10) : null;
+}
+
+function normalizeLinkedin(url?: string | null): string | null {
+  if (!url?.trim()) return null;
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(www[.])?/, '')
+    .replace(/\/+$/, '');
+}
+
+/** Escapes LIKE wildcards so a user's `50%` or `c_sharp` matches literally. */
+const likeEscape = (v: string) => v.replace(/[\\%_]/g, (m) => `\\${m}`);
+
+// Every text field a keyword can hit — profile, history, education, tags.
+const SEARCHABLE = `concat_ws(' ', c."firstName", c."lastName", c.email, c."currentTitle", c."currentCompany",
+  c.location, c.notes, array_to_string(c.skills, ' '), array_to_string(c.tags, ' '),
+  array_to_string(c.languages, ' '), c."employmentHistory"::text, c.education::text, c.certifications::text)`;
+
+// What a client may keyword-search: their view of the profile, no internal tags.
+const CLIENT_SEARCHABLE = `concat_ws(' ', c."firstName", c."lastName", c.email, c."currentTitle", c."currentCompany",
+  c.location, array_to_string(c.skills, ' '), array_to_string(c.languages, ' '))`;
+
+function applySearchFilters(qb: SelectQueryBuilder<Candidate>, p: CandidateSearchParams) {
+  let n = 0;
+  // Registers a bound parameter and returns its placeholder — `:pN`, or
+  // `(:...pN)` for a list used with IN.
+  const bind = (value: unknown) => {
+    const key = `p${n++}`;
+    qb.setParameter(key, value);
+    return Array.isArray(value) ? `(:...${key})` : `:${key}`;
+  };
+
+  if (p.q?.trim()) {
+    const fields = p.clientSafe ? CLIENT_SEARCHABLE : SEARCHABLE;
+    const sql = buildBooleanSearch(p.q, (term) => `${fields} ILIKE ${bind(`%${likeEscape(term)}%`)}`);
+    if (sql) qb.andWhere(`(${sql})`);
+  }
+  for (const skill of p.skills ?? []) {
+    qb.andWhere(`EXISTS (SELECT 1 FROM unnest(c.skills) s WHERE s ILIKE ${bind(`%${likeEscape(skill)}%`)})`);
+  }
+  for (const tag of p.tags ?? []) {
+    qb.andWhere(`EXISTS (SELECT 1 FROM unnest(c.tags) t WHERE lower(t) = lower(${bind(tag)}))`);
+  }
+  if (p.title) qb.andWhere(`c."currentTitle" ILIKE ${bind(`%${likeEscape(p.title)}%`)}`);
+  if (p.company) {
+    const v = bind(`%${likeEscape(p.company)}%`);
+    qb.andWhere(`(c."currentCompany" ILIKE ${v} OR c."employmentHistory"::text ILIKE ${v})`);
+  }
+  if (p.location) qb.andWhere(`c.location ILIKE ${bind(`%${likeEscape(p.location)}%`)}`);
+  if (p.education) qb.andWhere(`c.education::text ILIKE ${bind(`%${likeEscape(p.education)}%`)}`);
+  // A minimum of 0 is "no minimum" — it would otherwise exclude everyone with no experience recorded.
+  if (p.minExperience) qb.andWhere(`c."yearsExperience" >= ${bind(p.minExperience)}`);
+  if (p.maxExperience != null) qb.andWhere(`c."yearsExperience" <= ${bind(p.maxExperience)}`);
+  if (p.maxExpectedCtc != null) qb.andWhere(`c."expectedCtc" <= ${bind(p.maxExpectedCtc)}`);
+  if (p.maxNoticePeriod != null) qb.andWhere(`c."noticePeriod" <= ${bind(p.maxNoticePeriod)}`);
+  if (p.availableBy) qb.andWhere(`(c."availableFrom" IS NULL OR c."availableFrom" <= ${bind(p.availableBy)})`);
+  if (p.workAuthorization?.length) qb.andWhere(`c."workAuthorization" IN ${bind(p.workAuthorization)}`);
+  if (p.globalStatus?.length) qb.andWhere(`c."globalStatus" IN ${bind(p.globalStatus)}`);
+  if (p.source?.length) qb.andWhere(`c.source IN ${bind(p.source)}`);
+  if (p.ownerId === 'none') qb.andWhere('c."ownerId" IS NULL');
+  else if (p.ownerId) qb.andWhere(`c."ownerId" = ${bind(p.ownerId)}`);
+  if (p.masterPool) {
+    qb.andWhere(
+      `(c."globalStatus" = 'OPEN' OR (c."globalStatus" = 'ARCHIVED' AND c.status IN ('OPPORTUNITY', 'CONTACTED', 'NOT_INTERESTED')))`
+    );
+  }
+  // Role / stage / org conditions must hold on the *same* application, so a
+  // client's stage filter can't match through another client's role.
+  if (p.jobId || p.stage?.length || p.organizationId) {
+    const conds = ['a."candidateId" = c.id'];
+    if (p.jobId) conds.push(`a."jobId" = ${bind(p.jobId)}`);
+    if (p.stage?.length) conds.push(`a.stage IN ${bind(p.stage)}`);
+    if (p.organizationId) conds.push(`j."organizationId" = ${bind(p.organizationId)}`);
+    qb.andWhere(`EXISTS (SELECT 1 FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${conds.join(' AND ')})`);
+  }
+}

@@ -42,6 +42,7 @@ export default function Badge({ tone = 'neutral', children, className = '', dot 
 const STAGE_TONES: Record<CandidateStage, BadgeTone> = {
   APPLIED: 'neutral',
   SCREENING: 'warning',
+  SUBMITTED: 'brand',
   INTERVIEW: 'info',
   SHORTLISTED: 'purple',
   OFFER: 'brand',

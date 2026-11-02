@@ -16,6 +16,9 @@ import OrganizationPage from './pages/OrganizationPage';
 import OrganizationDetailPage from './pages/OrganizationDetailPage';
 import ActivityPage from './pages/ActivityPage';
 import SettingsPage from './pages/SettingsPage';
+import MyWorkPage from './pages/MyWorkPage';
+import NotificationsPage from './pages/NotificationsPage';
+import ComparePage from './pages/ComparePage';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 import LoginSplash from './components/auth/LoginSplash';
 import OktaRegisterModal from './components/auth/OktaRegisterModal';
@@ -80,6 +83,9 @@ function AppRoutes() {
         <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
         <Route path="/jobs" element={<PrivateRoute><JobsPage /></PrivateRoute>} />
         <Route path="/search" element={<AdminRoute><SearchPage /></AdminRoute>} />
+        <Route path="/my-work" element={<AdminRoute><MyWorkPage /></AdminRoute>} />
+        <Route path="/notifications" element={<PrivateRoute><NotificationsPage /></PrivateRoute>} />
+        <Route path="/compare" element={<PrivateRoute><ComparePage /></PrivateRoute>} />
         <Route path="/jobs/:id" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates" element={<PrivateRoute><CandidatesPage /></PrivateRoute>} />
         <Route path="/candidates/:id" element={<PrivateRoute><CandidateDetailPage /></PrivateRoute>} />

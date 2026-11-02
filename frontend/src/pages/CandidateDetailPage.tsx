@@ -18,11 +18,28 @@ import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { useJobs } from '../hooks/useJobs';
 import { useAuth } from '../context/AuthContext';
-import { humanize, formatDateTime } from '../utils/format';
+import { humanize, formatDateTime, timeAgo } from '../utils/format';
 import { useToast } from '../components/shared/Toast';
 import { useConfirm } from '../components/shared/Confirm';
 import { isAdminRole } from '../utils/roles';
 import { isValidNoticePeriod, isValidOptionalEmail } from '../utils/validation';
+import ProfileDetails from '../components/candidates/ProfileDetails';
+import ProfileFieldsEditor, {
+  EMPTY_PROFILE_FORM,
+  ProfileForm,
+  profileFormFrom,
+  profilePayload,
+} from '../components/candidates/ProfileFieldsEditor';
+import ApplicationRecords, { ScheduleInterviewModal } from '../components/candidates/ApplicationRecords';
+import RejectDialog from '../components/candidates/RejectDialog';
+import RoundScorecards from '../components/candidates/RoundScorecards';
+import ProfilePdfButton from '../components/candidates/ProfilePdfButton';
+import RecordTimeline from '../components/workflow/RecordTimeline';
+import RecordTasks from '../components/workflow/Tasks';
+import { JobLink, RejectionReason } from '../types';
+import { REJECTION_LABELS } from '../utils/labels';
+import { errorMessage } from '../utils/errors';
+import { CandidateAiPanel, DraftNoteButton, ResumeAutofill, mergeParsed } from '../components/ai/AiWidgets';
 
 const CAN_ACT_ROLES = ['ADMIN', 'CLIENT'];
 export const RESUME_ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -79,6 +96,11 @@ export default function CandidateDetailPage() {
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
+  const [profileForm, setProfileForm] = useState<ProfileForm>(EMPTY_PROFILE_FORM);
+  const [rejectTarget, setRejectTarget] = useState<{ jobId: string; jobTitle: string } | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<JobLink | null>(null);
+  const [submitTarget, setSubmitTarget] = useState<JobLink | null>(null);
+  const [submitNote, setSubmitNote] = useState('');
   const [editForm, setEditForm] = useState({
     firstName: '',
     lastName: '',
@@ -137,24 +159,14 @@ export default function CandidateDetailPage() {
   });
 
   const reject = useMutation({
-    mutationFn: (jobId: string) => withPending(jobId, () => candidateApi.reject(id!, jobId)),
+    mutationFn: ({ jobId, rejection }: { jobId: string; rejection: { rejectionReason: RejectionReason; rejectionNote?: string } }) =>
+      withPending(jobId, () => candidateApi.reject(id!, jobId, rejection)),
     onSuccess: () => {
+      setRejectTarget(null);
       invalidate();
       toast.success('Candidate rejected');
     },
     onError: fail('Couldn’t reject candidate'),
-  });
-
-  const requestInterview = useMutation({
-    mutationFn: (jobId: string) =>
-      withPending(jobId, () =>
-        candidateApi.requestInterview(id!, jobId, { notes: 'Interview requested via portal' })
-      ),
-    onSuccess: () => {
-      invalidate();
-      toast.success('Interview scheduled');
-    },
-    onError: fail('Couldn’t schedule the interview'),
   });
 
   const submitInterviewFeedback = useMutation({
@@ -188,9 +200,44 @@ export default function CandidateDetailPage() {
     onError: fail('Couldn’t link this candidate'),
   });
 
+  const submitToClient = useMutation({
+    mutationFn: (link: JobLink) =>
+      withPending(link.jobId, () => candidateApi.submitToClient(id!, link.jobId, submitNote.trim() || undefined)),
+    onSuccess: () => {
+      setSubmitTarget(null);
+      setSubmitNote('');
+      invalidate();
+      toast.success('Submitted to client', 'They’ll see the candidate marked as new for review.');
+    },
+    onError: (err) => toast.error('Couldn’t submit', errorMessage(err, 'Please try again.')),
+  });
+
+  const deleteCandidate = useMutation({
+    mutationFn: () => candidateApi.deleteCandidate(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates });
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+      toast.success('Candidate deleted');
+      navigate('/candidates');
+    },
+    onError: fail('Couldn’t delete this candidate'),
+  });
+
+  const confirmDeleteCandidate = async () => {
+    const ok = await confirm({
+      title: 'Delete candidate?',
+      description: `This permanently deletes ${candidate?.firstName} ${candidate?.lastName}, their role links, feedback and interview history. To keep the history, archive them instead.`,
+      confirmLabel: 'Delete permanently',
+      tone: 'danger',
+    });
+    if (ok) deleteCandidate.mutate();
+  };
+
   const updateCandidate = useMutation({
     mutationFn: () =>
       candidateApi.updateCandidate(id!, {
+        ...(profilePayload(profileForm).payload ?? {}),
         firstName: editForm.firstName.trim(),
         lastName: editForm.lastName.trim(),
         email: editForm.email.trim() || undefined,
@@ -225,6 +272,11 @@ export default function CandidateDetailPage() {
       toast.error('Invalid notice period', 'Enter a whole number of days, 0 or more.');
       return;
     }
+    const profileError = profilePayload(profileForm).error;
+    if (profileError) {
+      toast.error('Check the profile fields', profileError);
+      return;
+    }
     updateCandidate.mutate();
   };
 
@@ -245,6 +297,7 @@ export default function CandidateDetailPage() {
       notes: candidate.notes || '',
       noticePeriod: candidate.noticePeriod != null ? String(candidate.noticePeriod) : '',
     });
+    setProfileForm(profileFormFrom(candidate));
     setShowEditModal(true);
   };
 
@@ -405,47 +458,16 @@ export default function CandidateDetailPage() {
     if (ok) deleteInterviewFeedback.mutate(feedbackId);
   };
 
-  // Opens Google Calendar's "new event" composer prefilled for this interview
-  // round — frontend-only, no Calendar API/backend integration. Fire-and-
-  // forget: we advance the round as soon as this is clicked, regardless of
-  // whether the user actually finishes creating the event in the new tab.
-  const scheduleGoogleCalendar = (jobTitle: string, round: number) => {
-    if (!candidate) return;
-    const params = new URLSearchParams({
-      action: 'TEMPLATE',
-      text: `Interview Round ${round}: ${fullName} — ${jobTitle}`,
-      details: `Interview round ${round} with ${fullName} for the ${jobTitle} role.`,
-    });
-    if (candidate.email) params.set('add', candidate.email);
-    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank', 'noopener');
-  };
-
-  const handleScheduleRound = (jobId: string, jobTitle: string, round: number) => {
-    scheduleGoogleCalendar(jobTitle, round);
-    requestInterview.mutate(jobId);
+  const handleScheduleRound = (jobId: string, _jobTitle: string, _round: number) => {
+    const link = candidate?.jobLinks.find((l) => l.jobId === jobId);
+    if (link) setScheduleTarget(link);
   };
 
   const handleSelectCandidate = (jobId: string) => {
     selectCandidate.mutate(jobId);
   };
 
-  const confirmReject = async (jobId: string, jobTitle: string) => {
-    const ok = await confirm({
-      title: 'Reject candidate?',
-      description: (
-        <>
-          <span className="font-medium text-foreground">
-            {candidate?.firstName} {candidate?.lastName}
-          </span>{' '}
-          will be moved to Rejected for <span className="font-medium text-foreground">{jobTitle}</span>.
-          You can shortlist them again later.
-        </>
-      ),
-      confirmLabel: 'Reject candidate',
-      tone: 'danger',
-    });
-    if (ok) reject.mutate(jobId);
-  };
+  const confirmReject = (jobId: string, jobTitle: string) => setRejectTarget({ jobId, jobTitle });
 
   if (isLoading) {
     return (
@@ -543,11 +565,17 @@ export default function CandidateDetailPage() {
                       )}
                     </div>
                   </div>
-                  {canManageResume && (
-                    <Button variant="danger" size="sm" onClick={openEditModal} className="shrink-0">
-                      Edit
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 gap-1.5">
+                    <ProfilePdfButton candidate={candidate} isAdmin={canManageResume} />
+                    {canManageResume && (
+                      <>
+                        <Button variant="danger" size="sm" onClick={openEditModal}>
+                          Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" icon="trash" aria-label="Delete candidate" onClick={confirmDeleteCandidate} />
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -620,6 +648,18 @@ export default function CandidateDetailPage() {
               </div>
             )}
           </div>
+
+          <ProfileDetails candidate={candidate} isAdmin={canManageResume} />
+
+          <CandidateAiPanel candidate={candidate} />
+
+          {canManageResume && (
+            <RecordTimeline
+              recordType="candidate"
+              recordId={candidate._id}
+              title="Activity & notes"
+            />
+          )}
 
           {/* Feedback / Comments */}
           <div className="rounded-lg border border-border bg-card p-5 shadow-xs">
@@ -783,6 +823,14 @@ export default function CandidateDetailPage() {
                   )}
                 </div>
 
+                <RoundScorecards
+                  candidateId={candidate._id}
+                  candidateName={fullName}
+                  jobId={jobId}
+                  round={round}
+                  canAct={canAct}
+                />
+
                 {canAct && isOpen && (
                   <div className="mt-4 space-y-3 rounded-md border border-border bg-background p-3">
                     <Textarea
@@ -923,6 +971,42 @@ export default function CandidateDetailPage() {
                         <p className="truncate text-sm font-medium text-foreground">{link.jobTitle}</p>
                         <StageBadge stage={link.stage} />
                       </div>
+                      {link.stage === 'REJECTED' && link.rejectionReason && (
+                        <p className="mt-1.5 text-2xs text-subtle-foreground">
+                          Reason: <span className="text-muted-foreground">{REJECTION_LABELS[link.rejectionReason]}</span>
+                          {link.rejectionNote && ` — ${link.rejectionNote}`}
+                        </p>
+                      )}
+                      {link.submittedAt && (
+                        <div className="mt-2 rounded-md bg-muted/60 px-2.5 py-2 text-2xs text-muted-foreground">
+                          {canManageResume ? (
+                            <>
+                              Submitted {timeAgo(link.submittedAt)}
+                              {link.submittedByEmail && ` by ${link.submittedByEmail}`} ·{' '}
+                              {link.clientViewedAt ? (
+                                <span className="font-medium text-emerald-700 dark:text-emerald-400">viewed by client {timeAgo(link.clientViewedAt)}</span>
+                              ) : (
+                                <span className="font-medium text-amber-700 dark:text-amber-400">not yet viewed by client</span>
+                              )}
+                            </>
+                          ) : (
+                            <>Submitted by SWFS {timeAgo(link.submittedAt)} for your review</>
+                          )}
+                          {link.submissionNote && <p className="mt-1 whitespace-pre-wrap italic text-foreground/80">“{link.submissionNote}”</p>}
+                        </div>
+                      )}
+                      {canManageResume && ['APPLIED', 'SCREENING'].includes(link.stage) && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon="arrow-right"
+                          className="mt-3 w-full"
+                          onClick={() => setSubmitTarget(link)}
+                          disabled={isPending}
+                        >
+                          Submit to client
+                        </Button>
+                      )}
                       {canAct && !['REJECTED', 'OFFER', 'HIRED'].includes(link.stage) && (
                         <div className="mt-3 grid grid-cols-2 gap-1.5">
                           {link.stage !== 'SHORTLISTED' && link.interviewRound === 0 ? (
@@ -973,6 +1057,10 @@ export default function CandidateDetailPage() {
             )}
           </div>
 
+          <ApplicationRecords candidate={candidate} isAdmin={canManageResume} canAct={canAct} />
+
+          {canManageResume && <RecordTasks recordType="candidate" recordId={candidate._id} />}
+
           {canAct && candidate.globalStatus !== 'SELECTED' && availableJobs.length > 0 && (
             <div className="rounded-lg border border-border bg-card p-4 shadow-xs">
               <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
@@ -1009,6 +1097,8 @@ export default function CandidateDetailPage() {
         {/* Archived candidates get Actions/History in place of the pipeline panel */}
         {isArchived && (
           <div className="space-y-6">
+            {canManageResume && <RecordTasks recordType="candidate" recordId={candidate._id} />}
+            <ApplicationRecords candidate={candidate} isAdmin={canManageResume} canAct={false} />
             <div>
               <SectionTitle>Actions</SectionTitle>
               <div className="rounded-lg border border-dashed border-border bg-card">
@@ -1045,6 +1135,17 @@ export default function CandidateDetailPage() {
           centered
         >
           <div className="space-y-4">
+            <ResumeAutofill
+              candidateId={candidate._id}
+              hasResume={!!candidate.resumeUrl}
+              onParsed={(parsed) => {
+                const merged = mergeParsed(parsed, editForm, profileForm);
+                setEditForm({ ...editForm, ...merged.basic });
+                setProfileForm(merged.profile);
+                if (merged.filled) toast.success(`Filled ${merged.filled} field${merged.filled === 1 ? '' : 's'} from the résumé`, 'Existing values were kept. Review before saving.');
+                else toast.info('Nothing new to fill', 'Every field the résumé covers already has a value.');
+              }}
+            />
             <div className="flex flex-col items-center gap-2">
               <PhotoPicker
                 imageUrl={editPhotoUrl}
@@ -1221,6 +1322,11 @@ export default function CandidateDetailPage() {
             </Field>
 
             <div className="border-t border-border pt-4">
+              <p className="mb-3 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">Profile</p>
+              <ProfileFieldsEditor value={profileForm} onChange={setProfileForm} isAdmin={canManageResume} />
+            </div>
+
+            <div className="border-t border-border pt-4">
               <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
                 Résumé
               </p>
@@ -1288,6 +1394,56 @@ export default function CandidateDetailPage() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {rejectTarget && (
+        <RejectDialog
+          candidateName={fullName}
+          jobTitle={rejectTarget.jobTitle}
+          loading={reject.isPending}
+          onCancel={() => setRejectTarget(null)}
+          onConfirm={(rejection) => reject.mutate({ jobId: rejectTarget.jobId, rejection })}
+        />
+      )}
+      {submitTarget && (
+        <Modal
+          title="Submit to client"
+          description={`${fullName} · ${submitTarget.jobTitle}${submitTarget.organizationName ? ` · ${submitTarget.organizationName}` : ''}`}
+          onClose={() => setSubmitTarget(null)}
+          centered
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setSubmitTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={submitToClient.isPending} onClick={() => submitToClient.mutate(submitTarget)}>
+                Submit
+              </Button>
+            </>
+          }
+        >
+          <div className="mb-1 flex justify-end">
+            <DraftNoteButton candidateId={candidate._id} jobId={submitTarget.jobId} onDraft={setSubmitNote} />
+          </div>
+          <Field label="Why this candidate" hint="optional · the client sees this">
+            {(fid) => (
+              <Textarea
+                id={fid}
+                rows={4}
+                value={submitNote}
+                onChange={(e) => setSubmitNote(e.target.value)}
+                placeholder="e.g. 7 yrs Spark/Python, led a 5-person data team, available in 2 weeks, within budget."
+                autoFocus
+              />
+            )}
+          </Field>
+          <p className="mt-3 text-xs text-muted-foreground">
+            The candidate moves to <span className="font-medium text-foreground">Submitted</span>. You’ll see when the client first opens their profile.
+          </p>
+        </Modal>
+      )}
+      {scheduleTarget && (
+        <ScheduleInterviewModal candidate={candidate} link={scheduleTarget} onClose={() => setScheduleTarget(null)} />
       )}
     </AppLayout>
   );

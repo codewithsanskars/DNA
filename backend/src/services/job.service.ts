@@ -1,10 +1,14 @@
 import { jobRepository } from '../repositories/job.repository';
+import { workflowRepository } from '../repositories/workflow.repository';
 
 export const jobService = {
   // SWFS admin/recruiter view: every job across every client.
   getAllJobs: async () => {
     return jobRepository.findAll();
   },
+
+  getJobsPage: (opts: { organizationId: string | null; q?: string; status?: string; page: number; pageSize: number }) =>
+    jobRepository.findPage(opts),
 
   getJobsForOrganization: async (organizationId: string) => {
     return jobRepository.findByOrganization(organizationId);
@@ -39,9 +43,11 @@ export const jobService = {
       billableHours?: string;
       workType?: string;
       payrollType?: string;
+      ownerId?: string | null;
     }
   ) => {
     return jobRepository.create(organizationId, {
+      owner: data.ownerId ? { id: data.ownerId } : null,
       title: data.title,
       department: data.department,
       location: data.location,
@@ -74,11 +80,21 @@ export const jobService = {
       billableHours?: string;
       workType?: string;
       payrollType?: string;
+      ownerId?: string | null;
     }
   ) => {
     const job = await jobService.getJobById(jobId, organizationId);
     if (!job) throw new Error('Job not found');
     return jobRepository.update(jobId, data);
+  },
+
+  // Admin only — removes the role and (via FK cascade) every application on it.
+  deleteJob: async (jobId: string) => {
+    const job = await jobRepository.findById(jobId);
+    if (!job) throw Object.assign(new Error('Job not found'), { statusCode: 404 });
+    await jobRepository.delete(jobId);
+    await workflowRepository.deleteForRecord('job', jobId);
+    return job;
   },
 
   // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.

@@ -1,5 +1,61 @@
 import api from './axios';
-import { ApiResponse, Candidate, GlobalStatus, CandidateStatus } from '../types';
+import {
+  ApiResponse,
+  Candidate,
+  CandidatePage,
+  CandidateSource,
+  CandidateStage,
+  CandidateStatus,
+  CertificationEntry,
+  DuplicateMatch,
+  EducationEntry,
+  EmploymentEntry,
+  GlobalStatus,
+  MatchedSearchPage,
+  Paged,
+  RejectionReason,
+  WorkAuthorization,
+} from '../types';
+
+/** Extended profile fields accepted by create / update / import. */
+export interface CandidateProfileInput {
+  yearsExperience?: number | null;
+  education?: EducationEntry[];
+  certifications?: CertificationEntry[];
+  employmentHistory?: EmploymentEntry[];
+  languages?: string[];
+  currentCtc?: number | null;
+  expectedCtc?: number | null;
+  ctcCurrency?: string;
+  availableFrom?: string | null;
+  workAuthorization?: WorkAuthorization | null;
+  tags?: string[];
+  ownerId?: string | null;
+}
+
+export type CandidateSearchParams = Record<string, string | number | undefined>;
+
+export type BulkAction =
+  | { action: 'addTags' | 'removeTags'; tags: string[] }
+  | { action: 'setOwner'; ownerId: string | null }
+  | { action: 'setGlobalStatus'; globalStatus: GlobalStatus; status?: CandidateStatus }
+  | { action: 'linkJob'; jobId: string }
+  | { action: 'delete' };
+
+export type ImportRow = Record<string, unknown>;
+
+export interface ImportPreviewRow {
+  index: number;
+  valid: boolean;
+  duplicates: DuplicateMatch[];
+}
+
+export interface ImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { row: number; error: string }[];
+}
 
 export const candidateApi = {
   getCandidates: async (): Promise<Candidate[]> => {
@@ -17,8 +73,12 @@ export const candidateApi = {
     return res.data.data!;
   },
 
-  reject: async (id: string, jobId: string): Promise<Candidate> => {
-    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/reject`, { jobId });
+  reject: async (
+    id: string,
+    jobId: string,
+    rejection?: { rejectionReason?: RejectionReason; rejectionNote?: string }
+  ): Promise<Candidate> => {
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/reject`, { jobId, ...rejection });
     return res.data.data!;
   },
 
@@ -80,9 +140,9 @@ export const candidateApi = {
     linkedinUrl?: string;
     website?: string;
     notes?: string;
-    source?: 'PORTAL' | 'LINKEDIN';
+    source?: CandidateSource;
     noticePeriod?: number;
-  }): Promise<Candidate> => {
+  } & CandidateProfileInput): Promise<Candidate> => {
     const res = await api.post<ApiResponse<Candidate>>('/candidates', data);
     return res.data.data!;
   },
@@ -120,7 +180,7 @@ export const candidateApi = {
       website?: string;
       notes?: string;
       noticePeriod?: number;
-    }
+    } & CandidateProfileInput
   ): Promise<Candidate> => {
     const res = await api.patch<ApiResponse<Candidate>>(`/candidates/${id}`, data);
     return res.data.data!;
@@ -192,6 +252,110 @@ export const candidateApi = {
 
   deletePhoto: async (id: string): Promise<Candidate> => {
     const res = await api.delete<ApiResponse<Candidate>>(`/candidates/${id}/photo`);
+    return res.data.data!;
+  },
+
+  // ---- Recruiter workflow ------------------------------------------------
+
+  /** Kanban move. Clients may only move to SHORTLISTED / INTERVIEW / OFFER / REJECTED. */
+  setStage: async (
+    id: string,
+    jobId: string,
+    stage: CandidateStage,
+    rejection?: { rejectionReason?: RejectionReason; rejectionNote?: string }
+  ): Promise<Candidate> => {
+    const res = await api.patch<ApiResponse<Candidate>>(`/candidates/${id}/stage`, { jobId, stage, ...rejection });
+    return res.data.data!;
+  },
+
+  /** SWFS submits a screened candidate to the client for one role (admin only). */
+  submitToClient: async (id: string, jobId: string, note?: string): Promise<Candidate> => {
+    const res = await api.post<ApiResponse<Candidate>>(`/candidates/${id}/submit`, { jobId, note });
+    return res.data.data!;
+  },
+
+  deleteCandidate: async (id: string): Promise<void> => {
+    await api.delete(`/candidates/${id}`);
+  },
+
+  /** Paged list (both roles) — clients are scoped to their own roles server-side. */
+  list: async (params: {
+    q?: string;
+    globalStatus?: string;
+    jobId?: string;
+    stage?: string;
+    source?: string;
+    masterPool?: boolean;
+    page?: number;
+    pageSize?: number;
+    sort?: string;
+  }): Promise<CandidatePage> => {
+    const res = await api.get<ApiResponse<CandidatePage>>('/candidates/list', {
+      params: { ...params, masterPool: params.masterPool ? 'true' : undefined },
+    });
+    return res.data.data!;
+  },
+
+  /** Every page of a list query — for exports. Capped at 5,000 rows. */
+  listAll: async (params: { q?: string; globalStatus?: string; jobId?: string; masterPool?: boolean }): Promise<Candidate[]> => {
+    const out: Candidate[] = [];
+    for (let page = 1; page <= 25; page++) {
+      const res = await candidateApi.list({ ...params, page, pageSize: 200 });
+      out.push(...res.items);
+      if (out.length >= res.total || !res.items.length) break;
+    }
+    return out;
+  },
+
+  search: async (params: CandidateSearchParams): Promise<MatchedSearchPage> => {
+    const res = await api.get<ApiResponse<MatchedSearchPage>>('/candidates/search', { params });
+    return res.data.data!;
+  },
+
+  /** Every page of a talent search (same filters), for "Export all". Capped at 5,000 rows. */
+  searchAll: async (params: CandidateSearchParams): Promise<Candidate[]> => {
+    const out: Candidate[] = [];
+    for (let page = 1; page <= 25; page++) {
+      const res = await candidateApi.search({ ...params, page, pageSize: 200 });
+      out.push(...res.items);
+      if (out.length >= res.total || !res.items.length) break;
+    }
+    return out;
+  },
+
+  findDuplicates: async (probe: {
+    email?: string;
+    phone?: string;
+    linkedinUrl?: string;
+    firstName?: string;
+    lastName?: string;
+    excludeId?: string;
+  }): Promise<DuplicateMatch[]> => {
+    const res = await api.get<ApiResponse<DuplicateMatch[]>>('/candidates/duplicates', { params: probe });
+    return res.data.data!;
+  },
+
+  getTags: async (): Promise<{ tag: string; count: number }[]> => {
+    const res = await api.get<ApiResponse<{ tag: string; count: number }[]>>('/candidates/tags');
+    return res.data.data!;
+  },
+
+  bulk: async (ids: string[], op: BulkAction): Promise<{ affected: number }> => {
+    const res = await api.post<ApiResponse<{ affected: number }>>('/candidates/bulk', { ids, ...op });
+    return res.data.data!;
+  },
+
+  previewImport: async (rows: ImportRow[]): Promise<ImportPreviewRow[]> => {
+    const res = await api.post<ApiResponse<ImportPreviewRow[]>>('/candidates/import/preview', { rows });
+    return res.data.data!;
+  },
+
+  importCandidates: async (
+    rows: ImportRow[],
+    strategy: 'skip' | 'update' | 'create',
+    jobId?: string
+  ): Promise<ImportResult> => {
+    const res = await api.post<ApiResponse<ImportResult>>('/candidates/import', { rows, strategy, jobId });
     return res.data.data!;
   },
 };

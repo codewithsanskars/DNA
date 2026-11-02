@@ -3,9 +3,41 @@ import fs from 'fs';
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { candidateService } from '../services/candidate.service';
+import { matchService } from '../services/match.service';
+import { pdfService } from '../services/pdf.service';
 import { auditLogService } from '../services/auditLog.service';
 import { isAdminRole } from '../utils/roles';
 import { RESUME_DIR, CANDIDATE_PHOTO_DIR } from '../middleware/upload.middleware';
+import { parseProfileFields } from '../utils/candidateFields';
+import {
+  optionalEnum,
+  optionalNumber,
+  optionalString,
+  optionalStringArray,
+  optionalUuid,
+  orgScopeOf,
+  badRequest as httpBadRequest,
+} from '../utils/http';
+import { CANDIDATE_STAGES, GLOBAL_STATUSES, REJECTION_REASONS } from '../entities/enums';
+import { BulkAction, DuplicateStrategy, ImportRow } from '../services/candidate.service';
+import { CandidateSearchParams } from '../repositories/candidate.repository';
+
+const MAX_IMPORT_ROWS = 5000;
+
+// Query-string list: `?skills=react,node` or repeated `?skills=a&skills=b`.
+function listParam(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  const raw = Array.isArray(value) ? value.join(',') : String(value);
+  const list = raw.split(',').map((v) => v.trim()).filter(Boolean);
+  return list.length ? list : undefined;
+}
+
+function parseRejection(body: Record<string, unknown>) {
+  return {
+    reason: optionalEnum(body.rejectionReason, REJECTION_REASONS, 'Rejection reason') ?? null,
+    note: optionalString(body.rejectionNote, 'Rejection note', 2000) || null,
+  };
+}
 
 function badRequest(message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode: 400 });
@@ -71,10 +103,15 @@ export const candidateController = {
   getCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
-      const candidate = await candidateService.getCandidateById(req.params.id, orgScope);
+      let candidate = await candidateService.getCandidateById(req.params.id, orgScope);
       if (!candidate) {
         res.status(404).json({ success: false, error: 'Candidate not found' });
         return;
+      }
+      // A client opening a submitted candidate is the "viewed" signal (RC-45).
+      if (orgScope && (await candidateService.recordClientView(req.params.id, orgScope))) {
+        await auditLogService.log(req.user!, 'CLIENT_VIEWED_SUBMISSION', 'candidate', req.params.id, {});
+        candidate = (await candidateService.getCandidateById(req.params.id, orgScope)) ?? candidate;
       }
       res.json({ success: true, data: candidate });
     } catch (err) {
@@ -115,6 +152,8 @@ export const candidateController = {
         website,
         notes,
         noticePeriod: parseNoticePeriod(noticePeriod),
+        ownerId: optionalUuid(req.body.ownerId, 'Owner'),
+        ...parseProfileFields(req.body),
       });
       await auditLogService.log(req.user!, 'UPDATE_CANDIDATE', 'candidate', req.params.id, req.body);
       res.json({ success: true, data: updated });
@@ -147,8 +186,9 @@ export const candidateController = {
         return;
       }
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
-      const updated = await candidateService.rejectCandidate(req.params.id, jobId, orgScope);
-      await auditLogService.log(req.user!, 'REJECT', 'candidate', req.params.id, { jobId });
+      const rejection = parseRejection(req.body);
+      const updated = await candidateService.rejectCandidate(req.params.id, jobId, orgScope, rejection);
+      await auditLogService.log(req.user!, 'REJECT', 'candidate', req.params.id, { jobId, ...rejection });
       res.json({ success: true, data: updated });
     } catch (err) {
       next(err);
@@ -286,13 +326,14 @@ export const candidateController = {
 
   createCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const { jobId, firstName, lastName, email, phone, currentlyWorking, currentTitle, currentCompany, location, skills, linkedinUrl, website, notes, source, noticePeriod } = req.body;
+      const { jobId, firstName, lastName, email, phone, currentlyWorking, currentTitle, currentCompany, location, skills, linkedinUrl, website, notes, noticePeriod } = req.body;
       if (!firstName || !lastName) {
         res.status(400).json({ success: false, error: 'firstName and lastName are required' });
         return;
       }
       assertValidEmail(email);
-      const candidateSource = ['PORTAL', 'LINKEDIN'].includes(source) ? source : 'PORTAL';
+      const profile = parseProfileFields(req.body);
+      const candidateSource = profile.source ?? 'PORTAL';
 
       const candidate = await candidateService.createCandidate(jobId || undefined, {
         firstName,
@@ -307,8 +348,11 @@ export const candidateController = {
         linkedinUrl,
         website,
         notes,
+        ...profile,
         source: candidateSource,
         noticePeriod: parseNoticePeriod(noticePeriod),
+        // New candidates default to the recruiter who created them.
+        ownerId: optionalUuid(req.body.ownerId, 'Owner') ?? req.user!.userId,
       });
       await auditLogService.log(req.user!, 'CREATE_CANDIDATE', 'candidate', candidate._id, { jobId, email, source: candidateSource });
       res.status(201).json({ success: true, data: candidate });
@@ -479,4 +523,268 @@ export const candidateController = {
       next(err);
     }
   },
+
+  // ---- Recruiter workflow (admin unless noted) -------------------------------
+
+  /** Kanban stage move — CLIENT allowed for decision stages only (service enforces). */
+  setStage: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const jobId = optionalUuid(req.body.jobId, 'jobId');
+      const stage = optionalEnum(req.body.stage, CANDIDATE_STAGES, 'Stage');
+      if (!jobId || !stage) throw httpBadRequest('jobId and stage are required');
+      const rejection = parseRejection(req.body);
+      if (stage === 'SUBMITTED') {
+        // Same as the explicit submit action — never a client move.
+        if (orgScopeOf(req)) throw httpBadRequest('Only SWFS can submit candidates');
+        const submitted = await candidateService.submitToClient(req.params.id, jobId, req.user!.email, null);
+        await auditLogService.log(req.user!, 'SUBMIT_TO_CLIENT', 'candidate', req.params.id, { jobId });
+        res.json({ success: true, data: submitted });
+        return;
+      }
+      const updated = await candidateService.setStage(req.params.id, jobId, orgScopeOf(req), stage, rejection);
+      await auditLogService.log(req.user!, 'CHANGE_STAGE', 'candidate', req.params.id, {
+        jobId,
+        stage,
+        ...(stage === 'REJECTED' ? rejection : {}),
+      });
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  deleteCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const removed = await candidateService.deleteCandidate(req.params.id);
+      await auditLogService.log(req.user!, 'DELETE_CANDIDATE', 'candidate', req.params.id, {
+        name: `${removed.firstName} ${removed.lastName}`,
+      });
+      res.json({ success: true, data: { id: req.params.id } });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /** GET /candidates/:id/pdf?variant=client|internal&jobId= — downloadable profile. */
+  downloadPdf: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const variant = req.query.variant === 'internal' ? 'internal' : 'client';
+      const jobId = optionalUuid(req.query.jobId, 'Role') ?? undefined;
+      const { buffer, fileName } = await pdfService.candidateProfile(req.params.id, orgScopeOf(req), { variant, jobId });
+      await auditLogService.log(req.user!, 'EXPORT_CANDIDATE_PDF', 'candidate', req.params.id, { variant, jobId });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(buffer);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  search: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const q = req.query;
+      const owner = typeof q.owner === 'string' ? q.owner : undefined;
+      const params: CandidateSearchParams = {
+        q: optionalString(q.q, 'Query', 500) || undefined,
+        skills: listParam(q.skills),
+        title: optionalString(q.title, 'Title', 200) || undefined,
+        company: optionalString(q.company, 'Company', 200) || undefined,
+        location: optionalString(q.location, 'Location', 200) || undefined,
+        education: optionalString(q.education, 'Education', 200) || undefined,
+        minExperience: optionalNumber(q.minExperience, 'Min experience', { min: 0 }) ?? undefined,
+        maxExperience: optionalNumber(q.maxExperience, 'Max experience', { min: 0 }) ?? undefined,
+        maxExpectedCtc: optionalNumber(q.maxExpectedCtc, 'Max expected CTC', { min: 0 }) ?? undefined,
+        maxNoticePeriod: optionalNumber(q.maxNoticePeriod, 'Max notice period', { min: 0 }) ?? undefined,
+        availableBy: typeof q.availableBy === 'string' && q.availableBy ? q.availableBy : undefined,
+        workAuthorization: listParam(q.workAuthorization),
+        globalStatus: listParam(q.globalStatus)?.filter((s) => GLOBAL_STATUSES.includes(s as never)),
+        source: listParam(q.source),
+        tags: listParam(q.tags),
+        ownerId: owner === 'me' ? req.user!.userId : owner === 'none' ? 'none' : optionalUuid(owner, 'Owner') ?? undefined,
+        jobId: optionalUuid(q.jobId, 'jobId') ?? undefined,
+        stage: listParam(q.stage)?.filter((s) => CANDIDATE_STAGES.includes(s as never)),
+        page: optionalNumber(q.page, 'Page', { min: 1, integer: true }) ?? undefined,
+        pageSize: optionalNumber(q.pageSize, 'Page size', { min: 1, max: 200, integer: true }) ?? undefined,
+        sort: typeof q.sort === 'string' ? q.sort : undefined,
+      };
+      // "Match to role" filter: rank by JD match % instead of the normal sort.
+      const matchJobId = optionalUuid(q.matchJobId, 'Match role') ?? undefined;
+      const minMatch = optionalNumber(q.minMatch, 'Minimum match', { min: 0, max: 100 }) ?? 0;
+      const data = matchJobId
+        ? await matchService.searchWithMatch(params, matchJobId, minMatch)
+        : await candidateService.search(params);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
+   * Paged candidate list for both roles. A client is always scoped to
+   * candidates on their own roles and searches only client-visible fields;
+   * internal fields are stripped by the redact middleware.
+   */
+  list: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const q = req.query;
+      const orgScope = orgScopeOf(req);
+      const data = await candidateService.list({
+        q: optionalString(q.q, 'Query', 500) || undefined,
+        globalStatus: listParam(q.globalStatus)?.filter((s) => GLOBAL_STATUSES.includes(s as never)),
+        jobId: optionalUuid(q.jobId, 'jobId') ?? undefined,
+        stage: listParam(q.stage)?.filter((s) => CANDIDATE_STAGES.includes(s as never)),
+        source: orgScope ? undefined : listParam(q.source),
+        masterPool: !orgScope && q.masterPool === 'true',
+        organizationId: orgScope ?? undefined,
+        clientSafe: !!orgScope,
+        page: optionalNumber(q.page, 'Page', { min: 1, integer: true }) ?? 1,
+        pageSize: optionalNumber(q.pageSize, 'Page size', { min: 1, max: 200, integer: true }) ?? 25,
+        sort: ['recent', 'updated', 'name'].includes(String(q.sort)) ? String(q.sort) : 'recent',
+      });
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  findDuplicates: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const q = req.query as Record<string, string | undefined>;
+      const data = await candidateService.findDuplicates(
+        { email: q.email, phone: q.phone, linkedinUrl: q.linkedinUrl, firstName: q.firstName, lastName: q.lastName },
+        q.excludeId
+      );
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  getTags: async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ success: true, data: await candidateService.allTags() });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  bulk: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const ids = optionalStringArray(req.body.ids, 'ids', 1000) ?? [];
+      if (!ids.length) throw httpBadRequest('Select at least one candidate');
+      ids.forEach((id) => optionalUuid(id, 'Candidate id'));
+      const action = String(req.body.action || '');
+      let op: BulkAction;
+      switch (action) {
+        case 'addTags':
+        case 'removeTags': {
+          const tags = optionalStringArray(req.body.tags, 'Tags', 50) ?? [];
+          if (!tags.length) throw httpBadRequest('Provide at least one tag');
+          op = { action, tags };
+          break;
+        }
+        case 'setOwner':
+          op = { action, ownerId: optionalUuid(req.body.ownerId, 'Owner') ?? null };
+          break;
+        case 'setGlobalStatus':
+          if (!req.body.globalStatus) throw httpBadRequest('globalStatus is required');
+          op = { action, globalStatus: req.body.globalStatus, status: req.body.status || undefined };
+          break;
+        case 'linkJob': {
+          const jobId = optionalUuid(req.body.jobId, 'jobId');
+          if (!jobId) throw httpBadRequest('jobId is required');
+          op = { action, jobId };
+          break;
+        }
+        case 'delete':
+          op = { action };
+          break;
+        default:
+          throw httpBadRequest('Unknown bulk action');
+      }
+      const result = await candidateService.bulk(ids, op);
+      await auditLogService.log(req.user!, `BULK_${action.replace(/([A-Z])/g, '_$1').toUpperCase()}`, 'candidate', ids[0], {
+        count: ids.length,
+        ...op,
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  previewImport: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const rows = parseImportRows(req.body.rows);
+      res.json({ success: true, data: await candidateService.previewImport(rows) });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  importCandidates: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const rows = parseImportRows(req.body.rows);
+      const strategy = (optionalEnum(req.body.strategy, ['skip', 'update', 'create'] as const, 'Duplicate handling') ??
+        'skip') as DuplicateStrategy;
+      const jobId = optionalUuid(req.body.jobId, 'jobId') ?? undefined;
+      const result = await candidateService.importCandidates(rows, strategy, jobId);
+      await auditLogService.log(req.user!, 'IMPORT_CANDIDATES', 'candidate', result.ids[0] ?? 'import', {
+        rows: rows.length,
+        strategy,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errors: result.errors.length,
+      });
+      res.json({ success: true, data: { ...result, ids: undefined } });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  submitToClient: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const jobId = optionalUuid(req.body.jobId, 'jobId');
+      if (!jobId) throw httpBadRequest('jobId is required');
+      const note = optionalString(req.body.note, 'Submission note', 5000) || null;
+      const updated = await candidateService.submitToClient(req.params.id, jobId, req.user!.email, note);
+      await auditLogService.log(req.user!, 'SUBMIT_TO_CLIENT', 'candidate', req.params.id, { jobId, note });
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      next(err);
+    }
+  },
 };
+
+/** Validates each import row with the same rules as a manual create. */
+function parseImportRows(value: unknown): ImportRow[] {
+  if (!Array.isArray(value) || !value.length) throw httpBadRequest('No rows to import');
+  if (value.length > MAX_IMPORT_ROWS) throw httpBadRequest(`Import at most ${MAX_IMPORT_ROWS} rows at a time`);
+  return value.map((raw, i) => {
+    try {
+      const r = (raw ?? {}) as Record<string, unknown>;
+      const str = (k: string, max = 500) => optionalString(r[k] == null ? undefined : String(r[k]), k, max) || undefined;
+      const email = str('email', 320);
+      if (email) assertValidEmail(email);
+      return {
+        ...parseProfileFields(r),
+        name: str('name'),
+        firstName: str('firstName', 100),
+        lastName: str('lastName', 100),
+        email,
+        phone: str('phone', 50),
+        currentTitle: str('currentTitle', 200),
+        currentCompany: str('currentCompany', 200),
+        location: str('location', 200),
+        skills: optionalStringArray(r.skills, 'Skills', 100),
+        linkedinUrl: str('linkedinUrl', 500),
+        website: str('website', 500),
+        notes: str('notes', 10_000),
+        noticePeriod: optionalNumber(r.noticePeriod, 'Notice period', { min: 0, integer: true }),
+      } as ImportRow;
+    } catch (err) {
+      throw httpBadRequest(`Row ${i + 1}: ${(err as Error).message}`);
+    }
+  });
+}

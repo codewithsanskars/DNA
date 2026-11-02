@@ -1,6 +1,7 @@
 import { ReactNode, useCallback, useState } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import CommandPalette from './CommandPalette';
 
 interface AppLayoutProps {
   title: string;
@@ -65,6 +66,7 @@ export default function AppLayout({ title, subtitle, actions, backTo, backLabel,
           </div>
         </main>
       </div>
+      <CommandPalette />
     </div>
   );
 }

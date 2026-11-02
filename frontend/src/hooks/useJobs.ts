@@ -3,6 +3,6 @@ import { jobApi } from '../api/job.api';
 import { queryKeys } from '../api/queryKeys';
 
 /** All jobs visible to the current user. */
-export function useJobs() {
-  return useQuery({ queryKey: queryKeys.jobs, queryFn: jobApi.getJobs });
+export function useJobs(enabled = true) {
+  return useQuery({ queryKey: queryKeys.jobs, queryFn: jobApi.getJobs, enabled });
 }

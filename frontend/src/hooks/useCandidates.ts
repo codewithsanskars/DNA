@@ -3,6 +3,6 @@ import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 
 /** All candidates visible to the current user. */
-export function useCandidates() {
-  return useQuery({ queryKey: queryKeys.candidates, queryFn: candidateApi.getCandidates });
+export function useCandidates(enabled = true) {
+  return useQuery({ queryKey: queryKeys.candidates, queryFn: candidateApi.getCandidates, enabled });
 }
