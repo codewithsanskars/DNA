@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/rbac.middleware';
 import { uploadAvatar } from '../middleware/upload.middleware';
 
 const router = Router();
 
 router.post('/login', authController.login);
+router.post('/extension-token', authenticate, requireRole('ADMIN'), authController.extensionToken);
 router.get('/okta/status', authController.oktaStatus);
 router.get('/okta/login', authController.oktaLogin);
 router.get('/okta/callback', authController.oktaCallback);

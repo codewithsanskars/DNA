@@ -23,6 +23,7 @@ router.get('/status', aiController.status);
 // Cached analysis + cheap deterministic scoring, so not behind the LLM limiter.
 router.get('/jobs/:jobId/insights', requireRole('CLIENT', 'ADMIN'), aiController.jobInsights);
 router.get('/new-openings', requireRole('ADMIN'), aiController.newOpenings);
+router.post('/match-preview', requireRole('ADMIN'), aiController.matchPreview);
 router.use(aiLimiter);
 
 // Both roles. Org scoping is enforced in the service (clients only see their own records).

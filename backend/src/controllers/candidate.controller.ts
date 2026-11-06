@@ -5,6 +5,7 @@ import { AuthenticatedRequest } from '../types';
 import { candidateService } from '../services/candidate.service';
 import { matchService } from '../services/match.service';
 import { pdfService } from '../services/pdf.service';
+import { parseFormat } from '../services/brandedDoc.service';
 import { auditLogService } from '../services/auditLog.service';
 import { isAdminRole } from '../utils/roles';
 import { RESUME_DIR, CANDIDATE_PHOTO_DIR } from '../middleware/upload.middleware';
@@ -89,17 +90,6 @@ function assertValidRating(value: unknown): void {
 }
 
 export const candidateController = {
-  getCandidates: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    try {
-      const data = isAdminRole(req.user!.role)
-        ? await candidateService.getAllCandidates()
-        : await candidateService.getCandidatesForOrganization(req.user!.organizationId);
-      res.json({ success: true, data });
-    } catch (err) {
-      next(err);
-    }
-  },
-
   getCandidate: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const orgScope = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
@@ -565,14 +555,15 @@ export const candidateController = {
     }
   },
 
-  /** GET /candidates/:id/pdf?variant=client|internal&jobId= — downloadable profile. */
+  /** GET /candidates/:id/pdf?variant=client|internal&jobId=&format=pdf|docx — downloadable branded profile. */
   downloadPdf: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const variant = req.query.variant === 'internal' ? 'internal' : 'client';
       const jobId = optionalUuid(req.query.jobId, 'Role') ?? undefined;
-      const { buffer, fileName } = await pdfService.candidateProfile(req.params.id, orgScopeOf(req), { variant, jobId });
-      await auditLogService.log(req.user!, 'EXPORT_CANDIDATE_PDF', 'candidate', req.params.id, { variant, jobId });
-      res.setHeader('Content-Type', 'application/pdf');
+      const format = parseFormat(req.query.format);
+      const { buffer, fileName, mimeType } = await pdfService.candidateProfile(req.params.id, orgScopeOf(req), { variant, jobId, format });
+      await auditLogService.log(req.user!, 'EXPORT_CANDIDATE_PDF', 'candidate', req.params.id, { variant, jobId, format });
+      res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.send(buffer);
     } catch (err) {

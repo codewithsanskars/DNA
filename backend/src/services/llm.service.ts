@@ -53,12 +53,20 @@ async function chatOllama(messages: ChatMessage[], opts: ChatOptions): Promise<s
       model: env.ai.ollamaModel,
       messages,
       stream: false,
+      // Reasoning models (qwen3, deepseek-r1…) otherwise "think" first: much
+      // slower, and the reasoning can leak into the answer. Ignored by others.
+      think: false,
       ...(opts.json ? { format: 'json' } : {}),
-      options: { temperature: opts.temperature ?? 0.2, num_predict: opts.maxTokens ?? 1500 },
+      options: { temperature: opts.temperature ?? 0.2, num_predict: opts.maxTokens ?? 1500, num_ctx: env.ai.ollamaNumCtx },
     },
     { timeout: env.ai.timeoutMs }
   );
-  return data?.message?.content ?? '';
+  return stripThinking(data?.message?.content ?? '');
+}
+
+/** Removes <think>…</think> blocks some local models emit even with think:false. */
+function stripThinking(s: string): string {
+  return s.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*?<\/think>/i, '').trim();
 }
 
 /** Turns provider/network failures into a clear 503 instead of an opaque 500. */

@@ -1,4 +1,5 @@
 import { AppDataSource } from '../config/data-source';
+import { clientVisibleSql } from '../utils/clientVisibility';
 
 /**
  * Aggregate queries behind the dashboard charts. Every query takes
@@ -8,87 +9,94 @@ import { AppDataSource } from '../config/data-source';
  */
 const q = <T = Record<string, unknown>>(sql: string, params: unknown[]) => AppDataSource.query(sql, params) as Promise<T[]>;
 
-// `$1` is always the org id (or null). Appended to queries that join `jobs j`.
-const ORG = `($1::uuid IS NULL OR j."organizationId" = $1::uuid)`;
+// `$1` is always the org id (or null) and `$2` an optional single role
+// (null = every role in scope). Appended to queries that join `jobs j`. The
+// org condition always applies, so a client passing another org's role id
+// simply gets nothing back.
+const ORG = `($1::uuid IS NULL OR j."organizationId" = $1::uuid) AND ($2::uuid IS NULL OR j.id = $2::uuid)`;
+// For a client (`$1` set), only applications SWFS has submitted to them count
+// (utils/clientVisibility); admins (`$1` null) see every application.
+const VIS = `($1::uuid IS NULL OR ${clientVisibleSql('a')})`;
+type JobId = string | null;
 
 export const insightsRepository = {
-  stageCounts: (org: string | null) =>
+  stageCounts: (org: string | null, jobId: JobId = null) =>
     q<{ stage: string; count: string }>(
-      `SELECT a.stage, COUNT(*) AS count FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${ORG} GROUP BY a.stage`,
-      [org]
+      `SELECT a.stage, COUNT(*) AS count FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${ORG} AND ${VIS} GROUP BY a.stage`,
+      [org, jobId]
     ),
 
   /** Weekly series for the last `weeks` weeks: new applications, submissions, hires. */
-  weeklyTrend: (org: string | null, weeks: number) =>
+  weeklyTrend: (org: string | null, weeks: number, jobId: JobId = null) =>
     q<{ week: string; added: string; submitted: string; hired: string }>(
       `WITH w AS (
-         SELECT generate_series(date_trunc('week', now()) - ($2::int - 1) * interval '1 week', date_trunc('week', now()), interval '1 week') AS week
+         SELECT generate_series(date_trunc('week', now()) - ($3::int - 1) * interval '1 week', date_trunc('week', now()), interval '1 week') AS week
        ), a AS (
-         SELECT a.* FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${ORG}
+         SELECT a.* FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${ORG} AND ${VIS}
        )
        SELECT to_char(w.week, 'YYYY-MM-DD') AS week,
          (SELECT COUNT(*) FROM a WHERE date_trunc('week', a."appliedAt") = w.week) AS added,
          (SELECT COUNT(*) FROM a WHERE date_trunc('week', a."submittedAt") = w.week) AS submitted,
          (SELECT COUNT(*) FROM a WHERE a.stage = 'HIRED' AND date_trunc('week', a."stageUpdatedAt") = w.week) AS hired
        FROM w ORDER BY w.week`,
-      [org, weeks]
+      [org, jobId, weeks]
     ),
 
   /** Median days candidates have been sitting in each active stage. */
-  timeInStage: (org: string | null) =>
+  timeInStage: (org: string | null, jobId: JobId = null) =>
     q<{ stage: string; median_days: string; count: string }>(
       `SELECT a.stage,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM now() - a."stageUpdatedAt") / 86400) AS median_days,
               COUNT(*) AS count
          FROM applications a JOIN jobs j ON j.id = a."jobId"
-        WHERE ${ORG} AND a.stage NOT IN ('HIRED', 'REJECTED')
+        WHERE ${ORG} AND ${VIS} AND a.stage NOT IN ('HIRED', 'REJECTED')
         GROUP BY a.stage`,
-      [org]
+      [org, jobId]
     ),
 
   /** Candidate sources among candidates on in-scope roles (each candidate once). */
-  sources: (org: string | null) =>
+  sources: (org: string | null, jobId: JobId = null) =>
     q<{ source: string; count: string; hired: string }>(
       `SELECT c.source, COUNT(DISTINCT c.id) AS count,
               COUNT(DISTINCT c.id) FILTER (WHERE a.stage = 'HIRED') AS hired
          FROM candidates c
          LEFT JOIN applications a ON a."candidateId" = c.id
          LEFT JOIN jobs j ON j.id = a."jobId"
-        WHERE ($1::uuid IS NULL OR j."organizationId" = $1::uuid)
+        WHERE ${ORG} AND ${VIS}
         GROUP BY c.source`,
-      [org]
+      [org, jobId]
     ),
 
-  rejectionReasons: (org: string | null) =>
+  rejectionReasons: (org: string | null, jobId: JobId = null) =>
     q<{ reason: string | null; count: string }>(
       `SELECT a."rejectionReason" AS reason, COUNT(*) AS count
          FROM applications a JOIN jobs j ON j.id = a."jobId"
-        WHERE ${ORG} AND a.stage = 'REJECTED'
+        WHERE ${ORG} AND ${VIS} AND a.stage = 'REJECTED'
         GROUP BY a."rejectionReason"`,
-      [org]
+      [org, jobId]
     ),
 
   /** Days from application to hire, for hires in the last 180 days. */
-  timeToHire: (org: string | null) =>
+  timeToHire: (org: string | null, jobId: JobId = null) =>
     q<{ avg_days: string | null; median_days: string | null; hires: string }>(
       `SELECT AVG(EXTRACT(EPOCH FROM a."stageUpdatedAt" - a."appliedAt") / 86400) AS avg_days,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM a."stageUpdatedAt" - a."appliedAt") / 86400) AS median_days,
               COUNT(*) AS hires
          FROM applications a JOIN jobs j ON j.id = a."jobId"
-        WHERE ${ORG} AND a.stage = 'HIRED' AND a."stageUpdatedAt" > now() - interval '180 days'`,
-      [org]
+        WHERE ${ORG} AND ${VIS} AND a.stage = 'HIRED' AND a."stageUpdatedAt" > now() - interval '180 days'`,
+      [org, jobId]
     ),
 
-  offerOutcomes: (org: string | null) =>
+  offerOutcomes: (org: string | null, jobId: JobId = null) =>
     q<{ status: string; count: string }>(
       `SELECT o.status, COUNT(*) AS count
          FROM offers o JOIN applications a ON a.id = o."applicationId" JOIN jobs j ON j.id = a."jobId"
-        WHERE ${ORG} GROUP BY o.status`,
-      [org]
+        WHERE ${ORG} AND ${VIS} GROUP BY o.status`,
+      [org, jobId]
     ),
 
   /** Active placements with rates and the role's billable hours (for monthly billing). */
-  activePlacements: (org: string | null) =>
+  activePlacements: (org: string | null, jobId: JobId = null) =>
     q<{ bill: string | null; pay: string | null; hours: string | null; org_id: string; org_name: string }>(
       `SELECT p."billRate" AS bill, p."payRate" AS pay, j."billableHours" AS hours,
               o.id AS org_id, o.name AS org_name
@@ -96,8 +104,8 @@ export const insightsRepository = {
          JOIN applications a ON a.id = p."applicationId"
          JOIN jobs j ON j.id = a."jobId"
          JOIN organizations o ON o.id = j."organizationId"
-        WHERE ${ORG} AND p.status = 'ACTIVE'`,
-      [org]
+        WHERE ${ORG} AND ${VIS} AND p.status = 'ACTIVE'`,
+      [org, jobId]
     ),
 
   /** Per-client (admin) roll-up: open roles, active pipeline, hires. */
@@ -125,7 +133,7 @@ export const insightsRepository = {
               COUNT(a.id) FILTER (WHERE a.stage = 'HIRED') AS hires,
               COUNT(a.id) FILTER (WHERE a."submittedAt" IS NOT NULL) AS submitted,
               EXTRACT(DAY FROM now() - COALESCE(j."openedAt", j."createdAt")) AS days_open
-         FROM jobs j LEFT JOIN applications a ON a."jobId" = j.id
+         FROM jobs j LEFT JOIN applications a ON a."jobId" = j.id AND ${clientVisibleSql('a')}
         WHERE j."organizationId" = $1::uuid AND j.status = 'OPEN'
         GROUP BY j.id, j.title, j."openedAt", j."createdAt"
         ORDER BY pipeline DESC
@@ -133,20 +141,20 @@ export const insightsRepository = {
       [org]
     ),
 
-  roleCounts: (org: string | null) =>
+  roleCounts: (org: string | null, jobId: JobId = null) =>
     q<{ open: string; high: string; on_hold: string }>(
       `SELECT COUNT(*) FILTER (WHERE j.status = 'OPEN') AS open,
               COUNT(*) FILTER (WHERE j.status = 'OPEN' AND j.priority = 'HIGH') AS high,
               COUNT(*) FILTER (WHERE j.status = 'ON_HOLD') AS on_hold
          FROM jobs j WHERE ${ORG}`,
-      [org]
+      [org, jobId]
     ),
 
-  upcomingInterviewCount: (org: string | null) =>
+  upcomingInterviewCount: (org: string | null, jobId: JobId = null) =>
     q<{ count: string }>(
       `SELECT COUNT(*) AS count FROM interviews i
          JOIN applications a ON a.id = i."applicationId" JOIN jobs j ON j.id = a."jobId"
-        WHERE ${ORG} AND i.status = 'SCHEDULED' AND i."scheduledAt" BETWEEN now() AND now() + interval '7 days'`,
-      [org]
+        WHERE ${ORG} AND ${VIS} AND i.status = 'SCHEDULED' AND i."scheduledAt" BETWEEN now() AND now() + interval '7 days'`,
+      [org, jobId]
     ),
 };

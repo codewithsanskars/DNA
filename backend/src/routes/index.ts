@@ -9,6 +9,7 @@ import workflowRoutes from './workflow.routes';
 import pipelineRoutes from './pipeline.routes';
 import notificationRoutes from './notification.routes';
 import aiRoutes from './ai.routes';
+import digestRoutes from './digest.routes';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/workflow', workflowRoutes);
 router.use('/pipeline', pipelineRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/ai', aiRoutes);
+router.use('/digest', digestRoutes);
 
 export default router;

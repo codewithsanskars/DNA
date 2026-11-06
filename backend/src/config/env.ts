@@ -21,7 +21,15 @@ export const env = {
     openaiBaseUrl: (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
     ollamaUrl: (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/+$/, ''),
     ollamaModel: process.env.OLLAMA_MODEL || 'llama3.1',
+    // Ollama's default context (2–4k tokens) silently truncates résumés/JDs.
+    ollamaNumCtx: parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10),
     timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '120000', 10),
+  },
+  // Daily recruiter digest: an in-app notification to each SWFS staff member.
+  digest: {
+    enabled: process.env.DIGEST_ENABLED !== 'false',
+    hour: Math.min(23, Math.max(0, parseInt(process.env.DIGEST_HOUR || '8', 10))),
+    weekends: process.env.DIGEST_WEEKENDS === 'true',
   },
   jwtSecret: process.env.JWT_SECRET || 'swfs_dev_secret_change_in_prod',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',

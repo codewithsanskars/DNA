@@ -11,6 +11,7 @@ import DetailRow from '../shared/DetailRow';
 import Icon from '../shared/Icon';
 import { useToast } from '../shared/Toast';
 import { useConfirm } from '../shared/Confirm';
+import Pagination, { PAGE_SIZE, pageSlice } from '../shared/Pagination';
 import { jobApi } from '../../api/job.api';
 import { queryKeys } from '../../api/queryKeys';
 import { useOrganizations } from '../../hooks/useOrganizations';
@@ -60,6 +61,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
   const isAdmin = isAdminRole(user?.role);
   const isClient = !isAdmin;
   const [tab, setTab] = useState<Tab>('details');
+  const [candidatePage, setCandidatePage] = useState(1);
   const jdInputRef = useRef<HTMLInputElement>(null);
   const [downloadingJd, setDownloadingJd] = useState(false);
 
@@ -344,7 +346,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
         <EmptyState icon="users" title="No candidates yet" description="Candidates linked to this role will appear here." />
       ) : (
         <div className="space-y-2">
-          {candidates.map((c) => {
+          {pageSlice(candidates, candidatePage).map((c) => {
             const link = c.jobLinks.find((l) => l.jobId === job._id);
             return (
               <button
@@ -369,6 +371,7 @@ export default function JobDetailModal({ job, onClose, onEdit }: JobDetailModalP
               </button>
             );
           })}
+          <Pagination className="pt-1" page={candidatePage} pageSize={PAGE_SIZE} total={candidates.length} onPage={setCandidatePage} />
         </div>
       )}
     </Modal>

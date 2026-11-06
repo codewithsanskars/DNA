@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { aiApi } from '../../api/ai.api';
@@ -10,6 +11,15 @@ import Icon from '../shared/Icon';
 import Badge from '../shared/Badge';
 
 const MATCH_THRESHOLD = 60;
+const COLLAPSE_KEY = 'swfs_new_openings_collapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 const matchesUrl = (jobId: string, min = MATCH_THRESHOLD) => `/search?tab=database&matchJobId=${jobId}&minMatch=${min}`;
 
 function SkillChips({ must, nice = [] }: { must: string[]; nice?: string[] }) {
@@ -98,19 +108,49 @@ export function JobAiInsights({ jobId, isAdmin }: { jobId: string; isAdmin: bool
 export function NewOpeningsCard() {
   const navigate = useNavigate();
   const q = useQuery({ queryKey: queryKeys.newOpenings, queryFn: () => aiApi.newOpenings(14), staleTime: 5 * 60_000 });
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggle = () => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1');
+      } catch {
+        /* per-browser convenience only */
+      }
+      return !c;
+    });
+  };
   if (q.isLoading) return <div className="h-32 animate-pulse rounded-lg border border-border bg-muted" />;
   if (q.error || !q.data?.length) return null;
+  const totalMatches = q.data.reduce((s, o) => s + (o.matchCount ?? 0), 0);
+  const urgent = q.data.filter((o) => o.priority === 'HIGH').length;
   return (
-    <div className="rounded-lg border border-border bg-card shadow-xs">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h3 className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        aria-controls="new-openings-list"
+        className={`flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50 ${collapsed ? '' : 'border-b border-border'}`}
+      >
+        <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
           <Icon name="sparkles" size={14} className="text-brand-text" />
           New openings
           <Badge tone="brand">{q.data.length}</Badge>
-        </h3>
-        <span className="text-2xs text-subtle-foreground">Last 14 days · a match is {MATCH_THRESHOLD}%+ JD fit</span>
-      </div>
-      <ul className="grid md:grid-cols-2">
+          {collapsed && (
+            <span className="text-xs font-normal text-muted-foreground">
+              {totalMatches} matching candidate{totalMatches === 1 ? '' : 's'}
+              {urgent ? ` · ${urgent} high priority` : ''}
+            </span>
+          )}
+        </span>
+        <span className="flex items-center gap-2 text-2xs text-subtle-foreground">
+          {!collapsed && <span className="hidden sm:inline">Last 14 days · a match is {MATCH_THRESHOLD}%+ JD fit</span>}
+          <Icon name="chevron-down" size={14} className={`transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
+          <span className="sr-only">{collapsed ? 'Expand' : 'Collapse'}</span>
+        </span>
+      </button>
+      {/* Class toggle, not the `hidden` attribute: Tailwind's `grid` would override it. */}
+      <ul id="new-openings-list" className={`${collapsed ? 'hidden' : 'grid'} md:grid-cols-2`}>
         {q.data.map((o) => (
           <li key={o.id} className="border-b border-border p-4 md:odd:border-r">
             <div className="flex items-start justify-between gap-3">

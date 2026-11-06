@@ -5,6 +5,7 @@ import AppLayout from '../components/layout/AppLayout';
 import { TaskForm, TaskItem } from '../components/workflow/Tasks';
 import { NoteBody } from '../components/workflow/RecordTimeline';
 import Icon from '../components/shared/Icon';
+import DailyDigest from '../components/workflow/DailyDigest';
 import { workflowApi } from '../api/workflow.api';
 import { pipelineApi } from '../api/pipeline.api';
 import { queryKeys } from '../api/queryKeys';
@@ -71,6 +72,9 @@ export default function MyWorkPage() {
 
   return (
     <AppLayout title="My Work">
+      <div className="mb-6">
+        <DailyDigest />
+      </div>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           {/* Stat strip */}

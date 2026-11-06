@@ -5,6 +5,7 @@ import { userRepository } from '../repositories/user.repository';
 import { Interview, Offer, Placement } from '../entities';
 import { InterviewStatus, OfferStatus, PlacementStatus } from '../types';
 import { badRequest, forbidden, notFound } from '../utils/http';
+import { isClientVisible } from '../utils/clientVisibility';
 import { SCORECARD_CRITERIA, ScorecardRecommendation } from '../entities/enums';
 import { ScorecardRating } from '../entities/InterviewScorecard';
 
@@ -19,7 +20,7 @@ export function scopePlacement<T extends PlacementDto | null>(p: T, isAdmin: boo
 
 async function requireApplication(candidateId: string, jobId: string, organizationId: string | null) {
   const app = await pipelineRepository.findApplication(candidateId, jobId);
-  if (!app || (organizationId && app.job.organization?.id !== organizationId)) {
+  if (!app || (organizationId && (app.job.organization?.id !== organizationId || !isClientVisible(app)))) {
     throw notFound('Candidate is not linked to this role');
   }
   return app;

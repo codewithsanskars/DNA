@@ -8,14 +8,13 @@ import Icon from '../components/shared/Icon';
 import { TableShell, Thead, Th, Tr, Td, EmptyRow } from '../components/shared/Table';
 import { TableSkeleton } from '../components/shared/States';
 import { Input } from '../components/shared/Field';
-import Pagination from '../components/shared/Pagination';
+import Pagination, { PAGE_SIZE } from '../components/shared/Pagination';
 import { candidateApi } from '../api/candidate.api';
 import { queryKeys } from '../api/queryKeys';
 import { Candidate } from '../types';
 
 // The pool (OPEN, plus ARCHIVED as Opportunity / Contacted / Not interested)
 // is filtered server-side — see `masterPool` in candidate.repository.ts.
-const PAGE_SIZE = 25;
 
 export default function MasterDatabasePage() {
   const navigate = useNavigate();

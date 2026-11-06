@@ -92,7 +92,7 @@ function AdminDashboard() {
   const [drill, setDrill] = useState<CandidateListSpec | null>(null);
   const [showPlacements, setShowPlacements] = useState(false);
 
-  const insights = useQuery({ queryKey: queryKeys.insights, queryFn: dashboardApi.getInsights, refetchInterval: 60_000 });
+  const insights = useQuery({ queryKey: queryKeys.insights, queryFn: () => dashboardApi.getInsights(), refetchInterval: 60_000 });
   const summary = useQuery({ queryKey: queryKeys.dashboard, queryFn: dashboardApi.getSummary });
 
   const kpis = useReorderable<KpiKey>('swfs_dashboard_kpis_v3', DEFAULT_KPIS);

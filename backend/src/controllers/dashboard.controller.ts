@@ -1,3 +1,4 @@
+import { optionalUuid } from '../utils/http';
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { dashboardService } from '../services/dashboard.service';
@@ -28,7 +29,8 @@ export const dashboardController = {
   getInsights: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const org = isAdminRole(req.user!.role) ? null : req.user!.organizationId;
-      res.json({ success: true, data: await insightsService.get(org) });
+      const jobId = optionalUuid(req.query.jobId, 'Role') ?? null;
+      res.json({ success: true, data: await insightsService.get(org, jobId) });
     } catch (err) {
       next(err);
     }

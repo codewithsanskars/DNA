@@ -58,11 +58,6 @@ export interface ImportResult {
 }
 
 export const candidateApi = {
-  getCandidates: async (): Promise<Candidate[]> => {
-    const res = await api.get<ApiResponse<Candidate[]>>('/candidates');
-    return res.data.data!;
-  },
-
   getCandidate: async (id: string): Promise<Candidate> => {
     const res = await api.get<ApiResponse<Candidate>>(`/candidates/${id}`);
     return res.data.data!;

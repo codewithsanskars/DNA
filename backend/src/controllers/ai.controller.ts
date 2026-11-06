@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import { aiService } from '../services/ai.service';
 import { activeModel, activeProvider, llm } from '../services/llm.service';
 import { auditLogService } from '../services/auditLog.service';
-import { matchService } from '../services/match.service';
+import { matchService, scoreCandidate } from '../services/match.service';
 import { jobService } from '../services/job.service';
 import { jobRepository } from '../repositories/job.repository';
 import { candidateRepository } from '../repositories/candidate.repository';
@@ -130,6 +130,29 @@ export const aiController = {
         };
       })
     );
+  }),
+
+  /**
+   * JD match for a profile that isn't saved yet (Chrome extension). Same scorer
+   * as everywhere else, so the % agrees with the portal after saving.
+   */
+  matchPreview: wrap(async (req) => {
+    const job = await jobService.getJobById(uuid(req.body?.jobId, 'Role'), null);
+    if (!job) throw notFound('Role not found');
+    const p = req.body?.profile ?? {};
+    const requirements = await matchService.requirementsFor(job);
+    const match = scoreCandidate(
+      {
+        id: 'preview',
+        currentTitle: typeof p.currentTitle === 'string' ? p.currentTitle.slice(0, 200) : undefined,
+        location: typeof p.location === 'string' ? p.location.slice(0, 200) : undefined,
+        skills: Array.isArray(p.skills) ? p.skills.slice(0, 100).map(String) : [],
+        yearsExperience: Number.isFinite(Number(p.yearsExperience)) ? Number(p.yearsExperience) : undefined,
+        employmentHistory: Array.isArray(p.employmentHistory) ? p.employmentHistory.slice(0, 30) : [],
+      },
+      requirements
+    );
+    return { jobId: job.id, jobTitle: job.title, ...match };
   }),
 
   search: wrap(async (req) => aiService.naturalLanguageSearch(requiredString(req.body?.query, 'Search', 1000))),

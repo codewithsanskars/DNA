@@ -4,6 +4,11 @@ import IconButton from '../shared/IconButton';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
 import Icon from '../shared/Icon';
+import { useAuth } from '../../context/AuthContext';
+import { isAdminRole } from '../../utils/roles';
+
+// Separate Lead generator app. Override per environment with VITE_LEAD_GENERATOR_URL.
+const LEAD_GENERATOR_URL = import.meta.env.VITE_LEAD_GENERATOR_URL || 'http://localhost:3005';
 
 interface HeaderProps {
   title: string;
@@ -17,6 +22,7 @@ interface HeaderProps {
 export default function Header({ title, subtitle, onMenuClick, backTo, backLabel }: HeaderProps) {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <header className="z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-6">
@@ -49,6 +55,16 @@ export default function Header({ title, subtitle, onMenuClick, backTo, backLabel
       </div>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {isAdminRole(user?.role) && (
+          <a
+            href={LEAD_GENERATOR_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-brand-hover sm:px-3"
+            title="Open the Lead generator"
+          >
+            <Icon name="sparkles" size={13} />
+            <span className="hidden sm:inline">Lead generator</span>
+          </a>
+        )}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new Event('swfs:open-command-palette'))}

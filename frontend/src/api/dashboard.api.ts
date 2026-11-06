@@ -7,8 +7,9 @@ export const dashboardApi = {
     return res.data.data!;
   },
 
-  getInsights: async (): Promise<DashboardInsights> => {
-    const res = await api.get<ApiResponse<DashboardInsights>>('/dashboard/insights');
+  /** Optional `jobId` narrows every chart and KPI to one role. */
+  getInsights: async (jobId?: string): Promise<DashboardInsights> => {
+    const res = await api.get<ApiResponse<DashboardInsights>>('/dashboard/insights', { params: { jobId } });
     return res.data.data!;
   },
 

@@ -5,9 +5,8 @@ import { clientHomeRepository } from '../repositories/clientHome.repository';
 import { pipelineRepository } from '../repositories/pipeline.repository';
 import { scopePlacement } from './pipeline.service';
 
-function summarize(jobs: any[], candidates: any[], pipelineSummary: any, recentActivity: any[]) {
+function summarize(jobs: any[], totalCandidates: number, pipelineSummary: any, recentActivity: any[]) {
   const openJobs = jobs.filter((j: any) => j.status === 'OPEN').length;
-  const totalCandidates = candidates.length;
 
   return {
     openJobs,
@@ -23,26 +22,26 @@ function summarize(jobs: any[], candidates: any[], pipelineSummary: any, recentA
 
 export const dashboardService = {
   getSummary: async (organizationId: string) => {
-    const [jobs, candidates, pipelineSummary, recentActivity] = await Promise.all([
+    const [jobs, totalCandidates, pipelineSummary, recentActivity] = await Promise.all([
       jobService.getJobsForOrganization(organizationId),
-      candidateService.getCandidatesForOrganization(organizationId),
+      candidateService.countCandidates(organizationId),
       candidateService.getPipelineSummary(organizationId),
       auditLogService.getOrganizationActivity(organizationId, 5),
     ]);
 
-    return summarize(jobs, candidates, pipelineSummary, recentActivity);
+    return summarize(jobs, totalCandidates, pipelineSummary, recentActivity);
   },
 
   // SWFS admin/recruiter view: summary aggregated across every client.
   getGlobalSummary: async () => {
-    const [jobs, candidates, pipelineSummary, recentActivity] = await Promise.all([
+    const [jobs, totalCandidates, pipelineSummary, recentActivity] = await Promise.all([
       jobService.getAllJobs(),
-      candidateService.getAllCandidates(),
+      candidateService.countCandidates(null),
       candidateService.getPipelineSummary(null),
       auditLogService.getAllActivity(5),
     ]);
 
-    return summarize(jobs, candidates, pipelineSummary, recentActivity);
+    return summarize(jobs, totalCandidates, pipelineSummary, recentActivity);
   },
 
   /**

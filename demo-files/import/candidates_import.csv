@@ -1,0 +1,7 @@
+First Name,Last Name,Email,Phone,Current Title,Current Company,Location,Skills,LinkedIn,Years of Experience,Notice Period
+Priya,Natarajan,priya.natarajan@example.com,+1 (512) 555-0101,Frontend Engineer,Brightside,"Austin, TX","React; TypeScript; Next.js; GraphQL",https://www.linkedin.com/in/priya-natarajan,6,30
+Tobias,Keller,tobias.keller@example.com,+49 151 5550 1102,Backend Engineer,Fabrikam,"Berlin, Germany","Java; Spring Boot; Kafka; PostgreSQL",,8,60
+Amelia,Grant,amelia.grant@example.com,+1 (617) 555-0103,ICU Nurse,Mercy General,"Boston, MA","BLS; ACLS; ICU; Epic EHR",,4,15
+Chinedu,Obi,chinedu.obi@example.com,+1 (313) 555-0104,Controls Engineer,Rockline Automation,"Detroit, MI","PLC; Allen-Bradley; SCADA; HMI",,5,30
+Maya,Patel,maya.patel@outlook.com,,Frontend Engineer,Pixel Labs,"Dallas, TX",React,,6,15
+Sam,,sam.noname@example.com,,QA Engineer,,Remote,Cypress,,3,

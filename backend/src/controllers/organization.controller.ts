@@ -1,4 +1,5 @@
 import { pdfService } from '../services/pdf.service';
+import { parseFormat } from '../services/brandedDoc.service';
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { organizationService } from '../services/organization.service';
@@ -77,7 +78,7 @@ export const organizationController = {
     }
   },
 
-  /** GET /organization/:id/pdf — clients only for their own org. */
+  /** GET /organization/:id/pdf?format=pdf|docx — clients only for their own org. */
   downloadPdf: async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const isAdmin = req.user!.role === 'ADMIN';
@@ -85,8 +86,8 @@ export const organizationController = {
         res.status(403).json({ success: false, error: 'Access denied to this organization' });
         return;
       }
-      const { buffer, fileName } = await pdfService.organizationProfile(req.params.id, isAdmin);
-      res.setHeader('Content-Type', 'application/pdf');
+      const { buffer, fileName, mimeType } = await pdfService.organizationProfile(req.params.id, isAdmin, parseFormat(req.query.format));
+      res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.send(buffer);
     } catch (err) {

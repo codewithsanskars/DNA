@@ -55,6 +55,7 @@ export function notificationIcon(type: string): IconName {
     CLIENT_VIEWED: 'external',
     MENTION: 'at',
     TASK_ASSIGNED: 'check-square',
+    DAILY_DIGEST: 'sparkles',
   };
   return map[type] ?? 'bell';
 }

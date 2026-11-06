@@ -34,6 +34,13 @@ export const notificationRepository = {
     await repo().save(unique.map((id) => repo().create({ ...n, recipient: { id } as User })));
   },
 
+  /** Has this user already been sent a notification of `type` since `since`? (Idempotent daily jobs.) */
+  sentSince: async (userId: string, type: string, since: Date) =>
+    (await repo()
+      .createQueryBuilder('n')
+      .where('n."recipientId" = :userId AND n.type = :type AND n."createdAt" >= :since', { userId, type, since })
+      .getCount()) > 0,
+
   listForUser: async (userId: string, opts: { unreadOnly?: boolean; limit?: number; before?: Date }) => {
     const where: Record<string, unknown> = { recipient: { id: userId } };
     if (opts.unreadOnly) where.readAt = IsNull();

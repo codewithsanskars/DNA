@@ -15,6 +15,7 @@ import MasterDatabasePage from './pages/MasterDatabasePage';
 import OrganizationPage from './pages/OrganizationPage';
 import OrganizationDetailPage from './pages/OrganizationDetailPage';
 import ActivityPage from './pages/ActivityPage';
+import ExtensionConnectPage from './pages/ExtensionConnectPage';
 import SettingsPage from './pages/SettingsPage';
 import MyWorkPage from './pages/MyWorkPage';
 import NotificationsPage from './pages/NotificationsPage';
@@ -26,6 +27,18 @@ import OktaRegisterModal from './components/auth/OktaRegisterModal';
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
+
+/** One-shot post-login destination (only ever an in-app /extension/ path). */
+function consumeReturnTo(): string {
+  try {
+    const to = sessionStorage.getItem('swfs_return_to');
+    sessionStorage.removeItem('swfs_return_to');
+    if (to && to.startsWith('/extension/')) return to;
+  } catch {
+    /* ignore */
+  }
+  return '/dashboard';
+}
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -50,7 +63,17 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // Bring staff back to the extension connect page after signing in.
+    if (window.location.pathname.startsWith('/extension/')) {
+      try {
+        sessionStorage.setItem('swfs_return_to', window.location.pathname);
+      } catch {
+        /* storage blocked — they'll land on the dashboard instead */
+      }
+    }
+    return <Navigate to="/login" replace />;
+  }
   return isAdminRole(user.role) ? <>{children}</> : <Navigate to="/dashboard" replace />;
 }
 
@@ -76,7 +99,7 @@ function AppRoutes() {
         />
       )}
       <Routes>
-        <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/login" element={user ? <Navigate to={consumeReturnTo()} replace /> : <LoginPage />} />
         {/* Okta redirects here with ?token=… — AuthContext exchanges it for the
             logged-in user, and once that lands we're taken into the app. */}
         <Route path="/auth/callback" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
@@ -94,6 +117,7 @@ function AppRoutes() {
         <Route path="/organization/:id" element={<AdminRoute><OrganizationDetailPage /></AdminRoute>} />
         <Route path="/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />
         <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+        <Route path="/extension/connect" element={<AdminRoute><ExtensionConnectPage /></AdminRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>

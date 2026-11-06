@@ -12,8 +12,11 @@ import RejectDialog from './RejectDialog';
 import Icon from '../shared/Icon';
 import { useToast } from '../shared/Toast';
 import { useConfirm } from '../shared/Confirm';
+import { PAGE_SIZE } from '../shared/Pagination';
 
 const COLUMNS: CandidateStage[] = ['APPLIED', 'SCREENING', 'SUBMITTED', 'SHORTLISTED', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED'];
+/** Clients only ever see submitted candidates, so Applied / Screening aren't on their board. */
+const CLIENT_COLUMNS = COLUMNS.filter((s) => s !== 'APPLIED' && s !== 'SCREENING');
 /** Mirrors the backend rule in candidateService.setStage. */
 const CLIENT_TARGETS = new Set<CandidateStage>(['SHORTLISTED', 'INTERVIEW', 'OFFER', 'REJECTED']);
 const STALE_DAYS = 14;
@@ -33,6 +36,8 @@ export default function KanbanBoard({ jobId, candidates, isAdmin }: { jobId: str
   const [rejecting, setRejecting] = useState<Candidate | null>(null);
   // Optimistic stage overrides so the card lands immediately (AT-32).
   const [optimistic, setOptimistic] = useState<Record<string, CandidateStage>>({});
+  // Cards shown per column: 25 at a time, "Show more" adds the next 25.
+  const [shown, setShown] = useState<Partial<Record<CandidateStage, number>>>({});
 
   const move = useMutation({
     mutationFn: (v: { candidate: Candidate; stage: CandidateStage; rejection?: { rejectionReason: RejectionReason; rejectionNote?: string } }) =>
@@ -88,8 +93,10 @@ export default function KanbanBoard({ jobId, candidates, isAdmin }: { jobId: str
     <>
       <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
         <div className="flex min-w-max gap-3">
-          {COLUMNS.map((stage) => {
+          {(isAdmin ? COLUMNS : CLIENT_COLUMNS).map((stage) => {
             const cards = candidates.filter((c) => stageOf(c) === stage);
+            const limit = shown[stage] ?? PAGE_SIZE;
+            const visibleCards = cards.slice(0, limit);
             const allowed = canDropOn(stage);
             const isOver = overCol === stage && dragId !== null;
             return (
@@ -115,7 +122,7 @@ export default function KanbanBoard({ jobId, candidates, isAdmin }: { jobId: str
                   <span className="rounded-full bg-card px-1.5 text-2xs font-medium text-muted-foreground ring-1 ring-inset ring-border">{cards.length}</span>
                 </header>
                 <div className="flex min-h-[120px] flex-1 flex-col gap-2 px-2 pb-2">
-                  {cards.map((c) => {
+                  {visibleCards.map((c) => {
                     const link = c.jobLinks.find((l) => l.jobId === jobId);
                     const since = link?.stageUpdatedAt;
                     const stale = since && (Date.now() - new Date(since).getTime()) / 86_400_000 > STALE_DAYS && !['HIRED', 'REJECTED'].includes(stage);
@@ -166,6 +173,15 @@ export default function KanbanBoard({ jobId, candidates, isAdmin }: { jobId: str
                       </article>
                     );
                   })}
+                  {cards.length > limit && (
+                    <button
+                      type="button"
+                      onClick={() => setShown((s) => ({ ...s, [stage]: limit + PAGE_SIZE }))}
+                      className="rounded-md border border-dashed border-border py-1.5 text-2xs font-medium text-muted-foreground hover:border-brand/50 hover:text-foreground"
+                    >
+                      Show {Math.min(PAGE_SIZE, cards.length - limit)} more · {cards.length - limit} hidden
+                    </button>
+                  )}
                   {!cards.length && (
                     <p className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border py-6 text-2xs text-subtle-foreground">
                       {allowed ? 'Drop here' : 'SWFS only'}

@@ -20,7 +20,8 @@ router.post('/bulk', authenticate, requireRole('ADMIN'), candidateController.bul
 router.post('/import/preview', authenticate, requireRole('ADMIN'), candidateController.previewImport);
 router.post('/import', authenticate, requireRole('ADMIN'), candidateController.importCandidates);
 
-router.get('/', authenticate, candidateController.getCandidates);
+// Paginated (25 per page by default) — same handler as /list.
+router.get('/', authenticate, candidateController.list);
 router.post('/', authenticate, requireRole('ADMIN'), candidateController.createCandidate);
 router.get('/:id', authenticate, candidateController.getCandidate);
 router.patch('/:id', authenticate, requireRole('ADMIN'), candidateController.updateCandidate);

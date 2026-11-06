@@ -2,6 +2,7 @@ import { In } from 'typeorm';
 import { AppDataSource } from '../config/data-source';
 import { Application, Interview, InterviewScorecard, Offer, Placement } from '../entities';
 import { ScorecardRating } from '../entities/InterviewScorecard';
+import { isClientVisible } from '../utils/clientVisibility';
 
 const interviews = () => AppDataSource.getRepository(Interview);
 const offers = () => AppDataSource.getRepository(Offer);
@@ -106,6 +107,10 @@ function scopeWhere(organizationId: string | null, extra: Record<string, unknown
     : extra;
 }
 
+/** Client callers only see records on applications that were submitted to them. */
+const visibleTo = (organizationId: string | null) => (r: { application: Application }) =>
+  !organizationId || isClientVisible(r.application);
+
 export const pipelineRepository = {
   findApplication: (candidateId: string, jobId: string) =>
     applications().findOne({
@@ -121,11 +126,12 @@ export const pipelineRepository = {
       placements().find({ where, relations: APP_RELATIONS, order: { startDate: 'DESC' } }),
       scorecards().find({ where, relations: APP_RELATIONS, order: { round: 'ASC', createdAt: 'ASC' } }),
     ]);
+    const keep = visibleTo(organizationId);
     return {
-      interviews: i.map(interviewToDto),
-      offers: o.map(offerToDto),
-      placements: p.map(placementToDto),
-      scorecards: sc.map(scorecardToDto),
+      interviews: i.filter(keep).map(interviewToDto),
+      offers: o.filter(keep).map(offerToDto),
+      placements: p.filter(keep).map(placementToDto),
+      scorecards: sc.filter(keep).map(scorecardToDto),
     };
   },
 
@@ -141,7 +147,7 @@ export const pipelineRepository = {
       .orderBy('i.scheduledAt', 'ASC')
       .take(100);
     if (organizationId) qb.andWhere('organization.id = :organizationId', { organizationId });
-    return (await qb.getMany()).map(interviewToDto);
+    return (await qb.getMany()).filter(visibleTo(organizationId)).map(interviewToDto);
   },
 
   /** Offers awaiting the candidate's answer, for one org. */
@@ -152,7 +158,7 @@ export const pipelineRepository = {
       order: { createdAt: 'DESC' },
       take: 50,
     });
-    return rows.map(offerToDto);
+    return rows.filter(visibleTo(organizationId)).map(offerToDto);
   },
 
   listPlacements: async (organizationId: string | null) => {
@@ -162,7 +168,7 @@ export const pipelineRepository = {
       order: { startDate: 'DESC' },
       take: 500,
     });
-    return rows.map(placementToDto);
+    return rows.filter(visibleTo(organizationId)).map(placementToDto);
   },
 
   // ---- single-record lookups (scope is checked by the service) --------------

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SWFS Sourcer</title>
+    <link rel="stylesheet" href="../ui.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="../../icons/icon32.png" alt="" width="24" height="24" />
+        <div>
+          <p class="brand-name">SWFS Sourcer</p>
+          <p class="brand-sub" id="who">Not connected</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="refresh" title="Re-read this profile" aria-label="Re-read this profile"></button>
+        <button class="icon-btn" id="settings" title="Settings" aria-label="Settings"></button>
+      </div>
+    </header>
+    <main id="app" aria-live="polite"></main>
+    <footer class="actionbar" id="actionbar" hidden></footer>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

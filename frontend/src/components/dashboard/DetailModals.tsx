@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import Modal from '../shared/Modal';
-import Pagination from '../shared/Pagination';
+import Pagination, { PAGE_SIZE } from '../shared/Pagination';
 import Badge, { StageBadge } from '../shared/Badge';
 import Button from '../shared/Button';
 import Icon from '../shared/Icon';
@@ -21,6 +21,8 @@ export interface CandidateListSpec {
   /** Comma-joined stages, e.g. "INTERVIEW" or "APPLIED,SCREENING". */
   stage?: string;
   source?: string;
+  /** Limit to one role. */
+  jobId?: string;
   /** "Open full list" target. */
   fullListPath?: string;
 }
@@ -32,7 +34,7 @@ export interface CandidateListSpec {
 export function CandidateListModal({ spec, onClose }: { spec: CandidateListSpec; onClose: () => void }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
-  const params = { stage: spec.stage, source: spec.source, page, pageSize: 15, sort: 'updated' };
+  const params = { stage: spec.stage, source: spec.source, jobId: spec.jobId, page, pageSize: PAGE_SIZE, sort: 'updated' };
   const { data, isLoading, isFetching } = useQuery({
     queryKey: queryKeys.candidateList(params),
     queryFn: () => candidateApi.list(params),

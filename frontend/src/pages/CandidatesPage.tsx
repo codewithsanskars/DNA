@@ -19,7 +19,7 @@ import { humanize } from '../utils/format';
 import { useJobs } from '../hooks/useJobs';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { jobApi } from '../api/job.api';
-import Pagination from '../components/shared/Pagination';
+import Pagination, { PAGE_SIZE } from '../components/shared/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
 import { useToast } from '../components/shared/Toast';
@@ -119,7 +119,7 @@ export default function CandidatesPage() {
     }
     setSearchParams(next, { replace: true });
   };
-  const listParams = { globalStatus: activeTab, jobId: jobIdParam, q: q || undefined, page, pageSize: 25 };
+  const listParams = { globalStatus: activeTab, jobId: jobIdParam, q: q || undefined, page, pageSize: PAGE_SIZE };
   const listQuery = useQuery({
     queryKey: queryKeys.candidateList(listParams),
     queryFn: () => candidateApi.list(listParams),

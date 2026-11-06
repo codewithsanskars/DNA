@@ -7,6 +7,7 @@ import { candidateService } from '../services/candidate.service';
 import { matchService } from '../services/match.service';
 import { auditLogService } from '../services/auditLog.service';
 import { organizationRepository } from '../repositories/organization.repository';
+import { jobRepository } from '../repositories/job.repository';
 import { isAdminRole } from '../utils/roles';
 import { optionalUuid } from '../utils/http';
 import { JOB_DESCRIPTION_DIR } from '../middleware/upload.middleware';
@@ -24,6 +25,13 @@ function badRequest(message: string): Error & { statusCode: number } {
 // payRate is SWFS-internal cost data — never let it (or the margin derived
 // from it) reach a client response, no matter what the repository returns.
 // billRate is the one rate a client is allowed to see.
+/** Clients' candidate totals count only candidates submitted to them (utils/clientVisibility). */
+async function withClientCounts<T extends { id: string; totalCandidates?: number }>(jobs: T[], isAdmin: boolean): Promise<T[]> {
+  if (isAdmin || !jobs.length) return jobs;
+  const counts = await jobRepository.clientVisibleCounts(jobs.map((j) => j.id));
+  return jobs.map((j) => ({ ...j, totalCandidates: counts.get(j.id) ?? 0 }));
+}
+
 function scopeJobForRole<T extends { payRate?: number; billRate?: number }>(
   job: T,
   isAdmin: boolean
@@ -83,11 +91,12 @@ export const jobController = {
         const status = JOB_STATUSES.includes(req.query.status as never) ? String(req.query.status) : undefined;
         const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim().slice(0, 200) : undefined;
         const result = await jobService.getJobsPage({ organizationId: isAdmin ? null : req.user!.organizationId, q, status, page, pageSize });
-        res.json({ success: true, data: { ...result, items: result.items.map((job) => scopeJobForRole(job, isAdmin)) } });
+        const items = await withClientCounts(result.items, isAdmin);
+        res.json({ success: true, data: { ...result, items: items.map((job) => scopeJobForRole(job, isAdmin)) } });
         return;
       }
       const data = isAdmin ? await jobService.getAllJobs() : await jobService.getJobsForOrganization(req.user!.organizationId);
-      res.json({ success: true, data: data.map((job) => scopeJobForRole(job, isAdmin)) });
+      res.json({ success: true, data: (await withClientCounts(data, isAdmin)).map((job) => scopeJobForRole(job, isAdmin)) });
     } catch (err) {
       next(err);
     }
@@ -102,7 +111,8 @@ export const jobController = {
         res.status(404).json({ success: false, error: 'Job not found' });
         return;
       }
-      res.json({ success: true, data: scopeJobForRole(job, isAdmin) });
+      const [scoped] = await withClientCounts([job], isAdmin);
+      res.json({ success: true, data: scopeJobForRole(scoped, isAdmin) });
     } catch (err) {
       next(err);
     }
@@ -116,7 +126,7 @@ export const jobController = {
         res.status(404).json({ success: false, error: 'Job not found' });
         return;
       }
-      const candidates = await candidateService.getCandidatesForJob(req.params.id);
+      const candidates = await candidateService.getCandidatesForJob(req.params.id, orgScope !== null);
       res.json({ success: true, data: candidates });
     } catch (err) {
       next(err);
@@ -202,7 +212,8 @@ export const jobController = {
       });
       await auditLogService.log(req.user!, 'UPDATE_JOB', 'job', req.params.id, req.body);
       if (['title', 'description', 'location', 'workType'].some((k) => k in (req.body || {}))) matchService.analyzeInBackground(req.params.id);
-      res.json({ success: true, data: scopeJobForRole(job, isAdmin) });
+      const [scoped] = await withClientCounts([job], isAdmin);
+      res.json({ success: true, data: scopeJobForRole(scoped, isAdmin) });
     } catch (err) {
       next(err);
     }

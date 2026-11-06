@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "SWFS Sourcer",
+  "short_name": "SWFS",
+  "version": "1.0.0",
+  "description": "Capture LinkedIn profiles into the SWFS talent database in one click, with AI extraction, duplicate checks and JD match scoring.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "SWFS Sourcer",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "options_page": "src/options/options.html",
+  "permissions": ["storage", "sidePanel", "scripting"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://media.licdn.com/*",
+    "http://localhost:5173/*",
+    "http://localhost:5000/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["src/content/linkedin.js"],
+      "css": ["src/content/linkedin.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:5173/extension/*", "http://localhost:5000/extension/*"],
+      "js": ["src/content/portal-bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/icon32.png", "icons/logo.png"],
+      "matches": ["https://www.linkedin.com/*"]
+    }
+  ]
+}

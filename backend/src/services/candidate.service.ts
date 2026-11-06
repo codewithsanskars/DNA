@@ -10,6 +10,20 @@ import { CandidateStage, GlobalStatus, CandidateStatus, RejectionReason } from '
 import { GLOBAL_STATUSES, STATUS_OPTIONS_BY_GLOBAL_STATUS } from '../entities/enums';
 import { CandidateProfileFields } from '../utils/candidateFields';
 import { badRequest, forbidden, notFound } from '../utils/http';
+import { isClientVisible } from '../utils/clientVisibility';
+
+/**
+ * CLIENT callers may only act on an application that is on one of their own
+ * roles *and* visible to them (submitted — see utils/clientVisibility).
+ * Admin callers (organizationId null) are not restricted.
+ */
+async function assertClientApplication(candidateId: string, jobId: string, organizationId: string | null) {
+  if (!organizationId) return;
+  const app = await candidateRepository.findApplication(candidateId, jobId);
+  if (!app || app.job.organization?.id !== organizationId || !isClientVisible(app)) {
+    throw notFound('Candidate is not linked to this role');
+  }
+}
 
 /** Stages a candidate can be submitted from. */
 const SUBMITTABLE: CandidateStage[] = ['APPLIED', 'SCREENING'];
@@ -45,17 +59,12 @@ export type DuplicateStrategy = 'skip' | 'update' | 'create';
 
 export const candidateService = {
   // SWFS admin/recruiter view: every candidate across every client.
-  getAllCandidates: async () => {
-    return candidateRepository.findAll();
-  },
-
-  getCandidatesForOrganization: async (organizationId: string) => {
-    return candidateRepository.findByOrganization(organizationId);
-  },
+  /** Visible-candidate count for a dashboard; null = every candidate (SWFS). */
+  countCandidates: (organizationId: string | null) => candidateRepository.countForScope(organizationId),
 
   // Caller must have already verified job ownership before calling this.
-  getCandidatesForJob: async (jobId: string) => {
-    return candidateRepository.findByJob(jobId);
+  getCandidatesForJob: async (jobId: string, clientView = false) => {
+    return candidateRepository.findByJob(jobId, clientView);
   },
 
   // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
@@ -73,7 +82,8 @@ export const candidateService = {
 
   shortlistCandidate: async (candidateId: string, jobId: string, organizationId: string | null) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
+    await assertClientApplication(candidateId, jobId, organizationId);
     return candidateRepository.updateStageForJob(candidateId, jobId, 'SHORTLISTED');
   },
 
@@ -84,7 +94,8 @@ export const candidateService = {
     rejection?: { reason?: RejectionReason | null; note?: string | null }
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
+    await assertClientApplication(candidateId, jobId, organizationId);
     return candidateRepository.updateStageForJob(candidateId, jobId, 'REJECTED', rejection);
   },
 
@@ -109,6 +120,7 @@ export const candidateService = {
     if (!application || (organizationId && application.job.organization?.id !== organizationId)) {
       throw notFound('Candidate is not linked to this role');
     }
+    await assertClientApplication(candidateId, jobId, organizationId);
     if (stage === 'OFFER') return candidateService.selectCandidateForJob(candidateId, jobId, organizationId);
     return candidateRepository.updateStageForJob(candidateId, jobId, stage, rejection);
   },
@@ -274,7 +286,8 @@ export const candidateService = {
 
   requestInterview: async (candidateId: string, jobId: string, organizationId: string | null, _requestData: any) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
+    await assertClientApplication(candidateId, jobId, organizationId);
     return candidateRepository.advanceInterviewRound(candidateId, jobId);
   },
 
@@ -283,7 +296,8 @@ export const candidateService = {
   // it was for) and moves the candidate's overall status to SELECTED.
   selectCandidateForJob: async (candidateId: string, jobId: string, organizationId: string | null) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
+    await assertClientApplication(candidateId, jobId, organizationId);
     await candidateRepository.updateStageForJob(candidateId, jobId, 'OFFER');
     return candidateRepository.updateGlobalStatus(candidateId, 'SELECTED', 'SELECTED');
   },
@@ -296,7 +310,7 @@ export const candidateService = {
     author?: { email: string; role: string }
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
 
     await candidateRepository.addFeedback(candidateId, {
       author: author?.email ?? 'unknown',
@@ -319,7 +333,8 @@ export const candidateService = {
     author?: { email: string; role: string }
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
+    await assertClientApplication(candidateId, jobId, organizationId);
 
     return candidateRepository.addInterviewFeedback(candidateId, jobId, round, {
       author: author?.email ?? 'unknown',
@@ -339,7 +354,7 @@ export const candidateService = {
     requesterEmail: string
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const entry = (candidate.feedback || []).find((f) => f.id === feedbackId);
     if (!entry) throw new Error('Feedback not found');
     if (entry.author !== requesterEmail) {
@@ -356,7 +371,7 @@ export const candidateService = {
     requesterEmail: string
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const entry = (candidate.jobLinks || [])
       .flatMap((link) => link.interviewFeedback || [])
       .find((f) => f.id === feedbackId);
@@ -459,7 +474,7 @@ export const candidateService = {
     } & CandidateProfileFields
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     if (data.firstName !== undefined && !data.firstName.trim()) {
       throw new Error('firstName cannot be empty');
     }
@@ -491,7 +506,7 @@ export const candidateService = {
     status?: string
   ) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     if (!GLOBAL_STATUSES.includes(globalStatus as GlobalStatus)) {
       throw new Error('Invalid global status');
     }
@@ -512,7 +527,7 @@ export const candidateService = {
   // of the options for the candidate's *current* globalStatus.
   updateStatus: async (candidateId: string, organizationId: string | null, status: string) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const allowedStatuses = STATUS_OPTIONS_BY_GLOBAL_STATUS[candidate.globalStatus as GlobalStatus];
     if (!allowedStatuses.includes(status as CandidateStatus)) {
       throw new Error('Invalid status for this candidate’s global status');
@@ -522,7 +537,7 @@ export const candidateService = {
 
   linkToJob: async (candidateId: string, organizationId: string | null, jobId: string) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
 
     const job = await jobRepository.findById(jobId);
     if (!job || (organizationId && job.organizationId !== organizationId)) throw new Error('Job not found');
@@ -532,7 +547,9 @@ export const candidateService = {
     }
 
     await jobRepository.incrementCandidateCount(jobId);
-    return candidateRepository.addJobLink(candidateId, jobId, job.title);
+    // A client adding a candidate to another of their roles wants them considered
+    // there, so the link starts at Submitted (visible); SWFS links start at Applied.
+    return candidateRepository.addJobLink(candidateId, jobId, job.title, organizationId ? 'SUBMITTED' : 'APPLIED');
   },
 
   // organizationId === null means "any client" — reserved for SWFS admin/recruiter callers.
@@ -544,7 +561,7 @@ export const candidateService = {
 
   setResume: async (candidateId: string, organizationId: string | null, storedName: string, fileName: string) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const previous = await candidateRepository.getResumeFile(candidateId);
     const updated = await candidateRepository.setResume(candidateId, storedName, fileName);
     return { candidate: updated, previous };
@@ -552,7 +569,7 @@ export const candidateService = {
 
   deleteResume: async (candidateId: string, organizationId: string | null) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const previous = await candidateRepository.getResumeFile(candidateId);
     if (!previous) throw new Error('Candidate has no resume');
     const updated = await candidateRepository.clearResume(candidateId);
@@ -568,7 +585,7 @@ export const candidateService = {
 
   setPhoto: async (candidateId: string, organizationId: string | null, storedName: string, fileName: string) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const previous = await candidateRepository.getPhotoFile(candidateId);
     const updated = await candidateRepository.setPhoto(candidateId, storedName, fileName);
     return { candidate: updated, previous };
@@ -576,7 +593,7 @@ export const candidateService = {
 
   deletePhoto: async (candidateId: string, organizationId: string | null) => {
     const candidate = await candidateService.getCandidateById(candidateId, organizationId);
-    if (!candidate) throw new Error('Candidate not found');
+    if (!candidate) throw notFound('Candidate not found');
     const previous = await candidateRepository.getPhotoFile(candidateId);
     if (!previous) throw new Error('Candidate has no photo');
     const updated = await candidateRepository.clearPhoto(candidateId);

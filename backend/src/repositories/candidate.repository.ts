@@ -4,6 +4,7 @@ import { Candidate, Application, CandidateFeedback, InterviewFeedback } from '..
 import { CANDIDATE_STAGES } from '../entities/enums';
 import { CandidateStage, GlobalStatus, CandidateStatus, RejectionReason } from '../types';
 import { buildBooleanSearch } from '../utils/booleanSearch';
+import { clientVisibleSql, submissionStamp } from '../utils/clientVisibility';
 
 const repo = () => AppDataSource.getRepository(Candidate);
 const appRepo = () => AppDataSource.getRepository(Application);
@@ -107,40 +108,28 @@ function toDto(c: Candidate) {
 }
 
 export const candidateRepository = {
-  findAll: async () => {
-    const candidates = await repo().find({ relations: RELATIONS, order: { createdAt: 'DESC' } });
-    return candidates.map(toDto);
-  },
-
-  // Client view: only candidates actually linked to one of this org's roles.
-  // A candidate has no org of its own — its only relationship to a client is
-  // via the jobs (Applications) it's linked to. (Admin/recruiter callers use
-  // findAll instead, which isn't scoped this way.)
-  findByOrganization: async (organizationId: string) => {
-    const rows = await appRepo()
-      .createQueryBuilder('a')
-      .innerJoin('a.candidate', 'c')
-      .innerJoin('a.job', 'j')
-      .where('j."organizationId" = :organizationId', { organizationId })
-      .select('DISTINCT c.id', 'id')
-      .getRawMany<{ id: string }>();
-
-    const candidateIds = rows.map((r) => r.id);
-    if (!candidateIds.length) return [];
-
-    const candidates = await repo().find({
-      where: { id: In(candidateIds) },
-      relations: RELATIONS,
-      order: { createdAt: 'DESC' },
-    });
-    return candidates.map(toDto);
+  /**
+   * How many candidates the caller can see: every candidate for SWFS
+   * (organizationId null), or for a client those submitted to one of their
+   * roles (utils/clientVisibility). Lists themselves are paginated via `search`.
+   */
+  countForScope: async (organizationId: string | null) => {
+    if (!organizationId) return repo().count();
+    const [row] = await AppDataSource.query(
+      `SELECT COUNT(DISTINCT a."candidateId") AS count FROM applications a JOIN jobs j ON j.id = a."jobId"
+        WHERE j."organizationId" = $1 AND ${clientVisibleSql('a')}`,
+      [organizationId]
+    );
+    return Number(row?.count ?? 0);
   },
 
   // Callers are expected to have already verified job ownership (e.g. via
   // jobService.getJobById(jobId, orgScope)) before calling this.
-  findByJob: async (jobId: string) => {
-    const apps = await appRepo().find({ where: { job: { id: jobId } }, relations: ['candidate'] });
-    const candidateIds = [...new Set(apps.map((a) => a.candidate.id))];
+  // `clientView` limits it to applications the client may see.
+  findByJob: async (jobId: string, clientView = false) => {
+    const qb = appRepo().createQueryBuilder('a').select('a."candidateId"', 'id').where('a."jobId" = :jobId', { jobId });
+    if (clientView) qb.andWhere(clientVisibleSql('a'));
+    const candidateIds = [...new Set((await qb.getRawMany<{ id: string }>()).map((r) => r.id))];
     if (!candidateIds.length) return [];
     const candidates = await repo().find({
       where: { id: In(candidateIds) },
@@ -156,7 +145,7 @@ export const candidateRepository = {
   },
 
   // Same rule as findByOrganization: true only if the candidate is linked via
-  // an Application to a job this org posted.
+  // a client-visible Application to a job this org posted.
   isLinkedToOrganization: async (id: string, organizationId: string) => {
     const count = await appRepo()
       .createQueryBuilder('a')
@@ -164,6 +153,7 @@ export const candidateRepository = {
       .innerJoin('a.job', 'j')
       .where('c.id = :id', { id })
       .andWhere('j."organizationId" = :organizationId', { organizationId })
+      .andWhere(clientVisibleSql('a'))
       .getCount();
     return count > 0;
   },
@@ -172,12 +162,9 @@ export const candidateRepository = {
     const { jobLinks, rawData, ...rest } = data;
     const candidate = await repo().save(repo().create({ ...rest } as DeepPartial<Candidate>));
     for (const link of jobLinks || []) {
+      const stage = (link.stage as CandidateStage) || 'APPLIED';
       await appRepo().save(
-        appRepo().create({
-          candidate: { id: candidate.id } as any,
-          job: { id: link.jobId } as any,
-          stage: (link.stage as CandidateStage) || 'APPLIED',
-        })
+        appRepo().create({ candidate: { id: candidate.id } as any, job: { id: link.jobId } as any, stage, ...submissionStamp(stage) })
       );
     }
     return candidateRepository.findById(candidate.id);
@@ -188,7 +175,7 @@ export const candidateRepository = {
     const existing = await appRepo().findOne({ where: { candidate: { id }, job: { id: jobId } } });
     if (!existing) {
       await appRepo().save(
-        appRepo().create({ candidate: { id } as any, job: { id: jobId } as any, stage })
+        appRepo().create({ candidate: { id } as any, job: { id: jobId } as any, stage, ...submissionStamp(stage) })
       );
     }
     return candidateRepository.findById(id);
@@ -200,12 +187,15 @@ export const candidateRepository = {
     stage: CandidateStage,
     rejection?: { reason?: RejectionReason | null; note?: string | null }
   ) => {
+    const current = await appRepo().findOne({ where: { candidate: { id }, job: { id: jobId } }, select: ['id', 'stage', 'submittedAt'] });
     await appRepo()
       .createQueryBuilder()
       .update(Application)
       .set({
         stage,
         stageUpdatedAt: new Date(),
+        // Keeps client visibility consistent (utils/clientVisibility).
+        ...submissionStamp(stage, current),
         // Leaving REJECTED clears the old reason; entering it records the new one.
         rejectionReason: stage === 'REJECTED' ? rejection?.reason ?? null : null,
         rejectionNote: stage === 'REJECTED' ? rejection?.note ?? null : null,
@@ -227,6 +217,7 @@ export const candidateRepository = {
       stage: 'INTERVIEW',
       stageUpdatedAt: new Date(),
       interviewRound: application.interviewRound + 1,
+      ...submissionStamp('INTERVIEW', application),
     });
     return candidateRepository.findById(id);
   },
@@ -593,7 +584,7 @@ export const candidateRepository = {
       .select('a.stage', 'stage')
       .addSelect('COUNT(*)', 'count')
       .groupBy('a.stage');
-    if (organizationId) qb.andWhere('j."organizationId" = :organizationId', { organizationId });
+    if (organizationId) qb.andWhere('j."organizationId" = :organizationId', { organizationId }).andWhere(clientVisibleSql('a'));
 
     const rows = await qb.getRawMany<{ stage: string; count: string }>();
     for (const row of rows) counts[row.stage] = parseInt(row.count, 10);
@@ -716,7 +707,7 @@ function applySearchFilters(qb: SelectQueryBuilder<Candidate>, p: CandidateSearc
     const conds = ['a."candidateId" = c.id'];
     if (p.jobId) conds.push(`a."jobId" = ${bind(p.jobId)}`);
     if (p.stage?.length) conds.push(`a.stage IN ${bind(p.stage)}`);
-    if (p.organizationId) conds.push(`j."organizationId" = ${bind(p.organizationId)}`);
+    if (p.organizationId) conds.push(`j."organizationId" = ${bind(p.organizationId)}`, clientVisibleSql('a'));
     qb.andWhere(`EXISTS (SELECT 1 FROM applications a JOIN jobs j ON j.id = a."jobId" WHERE ${conds.join(' AND ')})`);
   }
 }

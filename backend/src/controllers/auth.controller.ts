@@ -1,3 +1,4 @@
+import { auditLogService } from '../services/auditLog.service';
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 import { userRepository } from '../repositories/user.repository';
@@ -119,6 +120,17 @@ export const authController = {
       res.json({ success: true, data: result });
     } catch (err) {
       res.status(400).json({ success: false, error: (err as Error).message });
+    }
+  },
+
+  /** POST /auth/extension-token — SWFS staff connect the Chrome extension from the portal. */
+  extensionToken: async (req: any, res: Response, next: NextFunction) => {
+    try {
+      const data = authService.issueExtensionToken(req.user);
+      await auditLogService.log(req.user, 'CONNECT_EXTENSION', 'user', req.user.userId, {});
+      res.json({ success: true, data: { ...data, user: { email: req.user.email, role: req.user.role } } });
+    } catch (err) {
+      next(err);
     }
   },
 

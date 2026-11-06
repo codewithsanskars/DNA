@@ -1,6 +1,7 @@
 import { DeepPartial } from 'typeorm';
 import { AppDataSource } from '../config/data-source';
 import { Job } from '../entities';
+import { clientVisibleSql } from '../utils/clientVisibility';
 
 const repo = () => AppDataSource.getRepository(Job);
 
@@ -39,6 +40,23 @@ function toDto(job: Job) {
 const RELATIONS = ['organization', 'owner'];
 
 export const jobRepository = {
+  /**
+   * Candidates a client can see per role (utils/clientVisibility). The stored
+   * `totalCandidates` counts every link, including Applied / Screening.
+   */
+  clientVisibleCounts: async (jobIds: string[]) => {
+    const counts = new Map<string, number>();
+    if (!jobIds.length) return counts;
+    const rows: { jobId: string; count: string }[] = await AppDataSource.query(
+      `SELECT a."jobId", COUNT(*) AS count FROM applications a
+        WHERE a."jobId" = ANY($1::uuid[]) AND ${clientVisibleSql('a')}
+        GROUP BY a."jobId"`,
+      [jobIds]
+    );
+    for (const r of rows) counts.set(r.jobId, Number(r.count));
+    return counts;
+  },
+
   findAll: async () => {
     const jobs = await repo().find({ relations: RELATIONS, order: { createdAt: 'DESC' } });
     return jobs.map(toDto);
@@ -115,8 +133,10 @@ export const jobRepository = {
       .leftJoinAndSelect('job.owner', 'owner')
       .where('job.status = :s', { s: 'OPEN' })
       .andWhere('COALESCE(job."openedAt", job."createdAt") >= :since', { since })
+      // .take() can't parse an expression sort, and .limit() is safe here
+      // because both joins are many-to-one (no row duplication).
       .orderBy('COALESCE(job."openedAt", job."createdAt")', 'DESC')
-      .take(limit)
+      .limit(limit)
       .getMany();
     return jobs.map((j) => ({ ...toDto(j), organizationName: j.organization?.name }));
   },

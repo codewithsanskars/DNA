@@ -19,6 +19,7 @@ import Badge, { GlobalStatusBadge } from '../shared/Badge';
 import Icon from '../shared/Icon';
 import { Input, Select } from '../shared/Field';
 import { useToast } from '../shared/Toast';
+import { PAGE_SIZE } from '../shared/Pagination';
 
 /** Every filter the search endpoint understands — all live in the URL (AT-07). */
 const FILTER_KEYS = [
@@ -129,7 +130,7 @@ export default function TalentSearch() {
   useEffect(() => setQDraft(params.get('q') ?? ''), [params]);
 
   const searchParams = useMemo(() => {
-    const out: Record<string, string> = { page: String(page), pageSize: '25', sort };
+    const out: Record<string, string> = { page: String(page), pageSize: String(PAGE_SIZE), sort };
     for (const k of FILTER_KEYS) if (params.get(k)) out[k] = params.get(k)!;
     return out;
   }, [params, page, sort]);

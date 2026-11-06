@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
 import { initializeDatabase } from './config/data-source';
+import { startDigestScheduler } from './services/digest.service';
 import apiRoutes from './routes';
 import { errorHandler, notFound } from './middleware/error.middleware';
 
@@ -32,7 +33,9 @@ app.use(
 );
 app.use(
   cors({
-    origin: env.frontendUrl,
+    // The portal itself, plus the SWFS Sourcer Chrome extension (which still
+    // needs a valid bearer token for every API call).
+    origin: (origin, cb) => cb(null, !origin || origin === env.frontendUrl || origin.startsWith('chrome-extension://')),
     credentials: true,
   })
 );
@@ -84,6 +87,7 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`[Server] Running on http://localhost:${env.port} (${env.nodeEnv})`);
   });
+  startDigestScheduler();
 }
 
 start();

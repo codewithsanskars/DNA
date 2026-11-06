@@ -183,6 +183,19 @@ export const authService = {
     return { token, user: { ...payload, name: user.name, avatarUrl: user.avatarUrl ?? null } };
   },
 
+  /**
+   * Long-lived token for the "SWFS Sourcer" Chrome extension. Same claims as a
+   * session token, tagged `aud: swfs-extension` so it's identifiable in logs.
+   */
+  issueExtensionToken: (user: JwtPayload) => {
+    const { userId, email, role, organizationId, organizationName } = user;
+    const token = jwt.sign({ userId, email, role, organizationId, organizationName }, env.jwtSecret, {
+      expiresIn: '30d',
+      audience: 'swfs-extension',
+    });
+    return { token, expiresInDays: 30 };
+  },
+
   verifyToken: (token: string): JwtPayload => {
     return jwt.verify(token, env.jwtSecret) as JwtPayload;
   },

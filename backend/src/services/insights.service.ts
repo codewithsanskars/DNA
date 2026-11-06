@@ -26,20 +26,21 @@ function monthlyHours(raw: string | null): number {
  * response never contains them.
  */
 export const insightsService = {
-  get: async (org: string | null) => {
+  /** `jobId` narrows everything to one role (still within `org`). */
+  get: async (org: string | null, jobId: string | null = null) => {
     const isAdmin = org === null;
     const [stages, trend, tis, sources, rejections, tth, offers, placements, groups, roles, interviews] = await Promise.all([
-      insightsRepository.stageCounts(org),
-      insightsRepository.weeklyTrend(org, 12),
-      insightsRepository.timeInStage(org),
-      insightsRepository.sources(org),
-      insightsRepository.rejectionReasons(org),
-      insightsRepository.timeToHire(org),
-      insightsRepository.offerOutcomes(org),
-      insightsRepository.activePlacements(org),
+      insightsRepository.stageCounts(org, jobId),
+      insightsRepository.weeklyTrend(org, 12, jobId),
+      insightsRepository.timeInStage(org, jobId),
+      insightsRepository.sources(org, jobId),
+      insightsRepository.rejectionReasons(org, jobId),
+      insightsRepository.timeToHire(org, jobId),
+      insightsRepository.offerOutcomes(org, jobId),
+      insightsRepository.activePlacements(org, jobId),
       isAdmin ? insightsRepository.byClient() : insightsRepository.byRole(org!),
-      insightsRepository.roleCounts(org),
-      insightsRepository.upcomingInterviewCount(org),
+      insightsRepository.roleCounts(org, jobId),
+      insightsRepository.upcomingInterviewCount(org, jobId),
     ]);
 
     const byStage = Object.fromEntries(CANDIDATE_STAGES.map((s) => [s, 0])) as Record<string, number>;

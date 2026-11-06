@@ -220,10 +220,39 @@ Guardrails: prompts forbid using protected traits and inventing facts. Model out
 
 | Ask | Decision | What shipped | Admin | Client |
 |---|---|---|---|---|
-| PDF profiles: candidates and organizations | ✅ Built | Server-rendered with pdfkit (`services/pdf.service.ts`), so redaction can't be bypassed. Candidate: **Client-safe** (default) or **Internal** (CTC, tags, owner, notes, every role), plus an optional "Match to role" section. Org: overview, hiring stats, roles with AI summaries, contacts | Both variants; org PDF for any client | Client-safe only; own roles only; own org only |
+| PDF / Word profiles: candidates and organizations | ✅ Built | Server-rendered as PDF (pdfkit) or Word .docx (`docx`) from one SWFS company template (`services/brandedDoc.service.ts`): logo letterhead, document type and date on every page, red rule, footer with confidentiality note and "Page X of Y". Logo ships in `backend/assets/logo.png`. Content built in `services/pdf.service.ts` (`?format=pdf|docx`), so redaction can't be bypassed. Candidate: **Client-safe** (default) or **Internal** (CTC, tags, owner, notes, every role), plus an optional "Match to role" section. Org: overview, hiring stats, roles with AI summaries, contacts | Both variants; org PDF for any client | Client-safe only; own roles only; own org only |
 | Download the filtered candidate list | 🟡 Already existed on Candidates; **fixed on Talent database** (exported only 25 rows) | "Export all" exports every filtered row, capped at 5,000. Adds JD match %, matched and missing skills columns when a JD filter is on | Yes | Candidates page (existing) |
 | AI summary on new openings + matching-candidate count | ✅ Built, redesigned | On create, on edit, or when a JD is attached, one LLM call stores `aiSummary` + `aiRequirements` on the job (keyword fallback if the LLM is down). Counts use the deterministic scorer in `services/match.service.ts`. The dashboard gets a **New openings** card; role details get an **AI summary** card | Summary, requirements, pool match count | Summary and requirements only (the pool is internal) |
 | Match % when filtering by a JD | ✅ Built | Talent database › "Match to a role's JD" filter, plus 50/60/75%+ minimum. Results are sorted by match % and show matched and missing skills | Yes | — |
 | "AI integrations everywhere" | ⚠️ Not as-is | Too vague; covered by the targeted features above | — | — |
 
 Match % = 55% must-have skill coverage + 20% title similarity + 10% nice-to-have + 10% experience + 5% location, with weights renormalised to what the JD specifies. "Match" = 60%+, "strong" = 80%+. **Prod DB:** the new `jobs.aiSummary/aiRequirements/aiAnalyzedAt` columns need `DB_SYNC=true` once (or a migration).
+
+### Daily recruiter digest (November 2026)
+
+| Capability | Status | Admin | Client |
+|---|---|---|---|
+| Digest panel at the top of **My Work**: Today's focus (top 3 actions) plus sections for scorecards missing, tasks due, interviews today, waiting on client (submitted 3+ days ago), roles at risk (open 7+ days, no submission in 7 days, with pool match count), stuck in stage (per-stage thresholds), follow-ups (no contact in 14+ days), new roles, and wins. **Mine / Team** toggle | ✅ | Yes | No (`/api/digest` is ADMIN-only) |
+| Daily in-app notification ("Your day: 3 priorities") linking to `/my-work#digest`. In-process scheduler, idempotent per user per day; skipped when there's nothing to report | ✅ `DIGEST_ENABLED`, `DIGEST_HOUR` (server-local, default 8), `DIGEST_WEEKENDS` | Yes | — |
+| Email delivery of the digest | ❌ No email infrastructure yet (same gap as RC-20) | — | — |
+
+The sections are plain SQL (`repositories/digest.repository.ts`). The AI only **ranks** items the SQL already found, picking them by id, so it can't invent records or links. If the LLM is down, a rule-based ranking is used. Digests are cached per user, scope and day for 30 minutes; refresh bypasses the cache.
+
+### Interactive client home (November 2026)
+
+| Capability | Status | Admin | Client |
+|---|---|---|---|
+| **Role filter** chips (kept in the URL as `?role=`). They narrow every KPI, chart and list, and show a badge with how many candidates await review for each role | ✅ | — | Own roles only |
+| **Clickable KPI tiles**: Awaiting review, Active pipeline (with week-over-week submissions), Interviews in 14 days, Offers out (with historical acceptance), Time to hire (median), People placed. Each jumps to and highlights its section, or opens the list behind it | ✅ | — | Yes |
+| **Hiring analytics** on the client home: funnel, weekly activity, where candidates wait, and either a role comparison (all roles; click to focus) or rejection reasons (one role). Every mark opens the matching candidates | ✅ `GET /dashboard/insights?jobId=` (role-scoped; the org scope still applies, so another org's role id returns nothing) | Admin dashboard unchanged | Yes |
+| Review queue: **New only** toggle, sort by Newest or Waiting longest, a "Waiting Nd" flag at 5+ days, and click the role name to filter | ✅ | — | Yes |
+| Role pipeline bars: each segment and legend entry opens the candidates in that stage for that role | ✅ | — | Yes |
+
+### Roadmap fixes F2 and F3 (November 2026)
+
+| Fix | What shipped | Admin | Client |
+|---|---|---|---|
+| **F2: Pagination, 25 per page** | One shared `PAGE_SIZE = 25` (`components/shared/Pagination.tsx`) for every candidate list: Candidates, Master database, Talent search, dashboard drill-downs (were 15), the client review queue (was silently capped at 30), the role modal's candidate tab, and the organizations table. Board columns show 25 cards, then "Show 25 more". `GET /candidates` is now paginated (same handler as `/candidates/list`). The unused load-everything hook/endpoint is gone, and dashboard summaries count with SQL instead of loading every candidate | Yes | Yes |
+| **F3: Clients see only submitted candidates** | One rule in `utils/clientVisibility.ts`: an application is visible to the client at Submitted / Interview / Shortlisted / Offer / Hired, or Rejected *after* submission. Applied, Screening and pre-submission rejections stay internal. Applied in every client read: candidate list/search, detail, PDF/Word, role board, role totals, stage counts, client home, analytics, interviews/offers/placements, and the redaction middleware. Client actions (shortlist, reject, stage move, interview, offer, interview feedback) on a hidden application return 404. `submittedAt` is stamped when an application first reaches a visible stage (or is rejected from one) and cleared when it's moved back to Applied / Screening (withdrawn) | Unchanged: sees everything | Board has no Applied / Screening columns. A client adding a candidate to another of their roles creates the link at Submitted |
+
+Verified end-to-end against the demo data as `client.admin@techcorp.com` (18 checks): 13 visible candidates vs 6 hidden, 404s on hidden candidates, counts match, and the Screening ⇄ Shortlisted ⇄ client-rejected round-trip.

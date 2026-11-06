@@ -1,6 +1,7 @@
 import { AppDataSource } from '../config/data-source';
 import { Application, Job } from '../entities';
 import { CandidateStage } from '../types';
+import { clientVisibleSql } from '../utils/clientVisibility';
 
 const apps = () => AppDataSource.getRepository(Application);
 const jobs = () => AppDataSource.getRepository(Job);
@@ -18,7 +19,8 @@ export const clientHomeRepository = {
       .where('j."organizationId" = :organizationId', { organizationId })
       .andWhere('a.stage = :stage', { stage: 'SUBMITTED' })
       .orderBy('a.submittedAt', 'DESC', 'NULLS LAST')
-      .take(30)
+      // The page paginates this queue (25 per page); the cap only bounds the payload.
+      .take(500)
       .getMany();
     return rows.map((a) => ({
       applicationId: a.id,
@@ -55,6 +57,7 @@ export const clientHomeRepository = {
       .addSelect('a.stage', 'stage')
       .addSelect('COUNT(*)', 'count')
       .where('j."organizationId" = :organizationId', { organizationId })
+      .andWhere(clientVisibleSql('a'))
       .groupBy('j.id')
       .addGroupBy('a.stage')
       .getRawMany();

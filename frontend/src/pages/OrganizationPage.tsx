@@ -9,12 +9,13 @@ import Modal from '../components/shared/Modal';
 import Button from '../components/shared/Button';
 import { Field, Input, Textarea } from '../components/shared/Field';
 import Avatar from '../components/shared/Avatar';
+import Pagination, { PAGE_SIZE, pageSlice } from '../components/shared/Pagination';
 import { useOrganizations } from '../hooks/useOrganizations';
 import { organizationApi } from '../api/organization.api';
 import { queryKeys } from '../api/queryKeys';
 import { useAuth } from '../context/AuthContext';
 import { isAdminRole } from '../utils/roles';
-import { pdfApi } from '../api/pdf.api';
+import { EXPORT_FORMATS, pdfApi } from '../api/pdf.api';
 import { useToast } from '../components/shared/Toast';
 import { OrganizationSocialLinks } from '../types';
 import { errorMessage } from '../utils/errors';
@@ -45,6 +46,7 @@ export default function OrganizationPage() {
   const { data: orgs, isLoading } = useOrganizations();
 
   const [showForm, setShowForm] = useState(false);
+  const [page, setPage] = useState(1);
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [scrapedFrom, setScrapedFrom] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
@@ -135,14 +137,19 @@ export default function OrganizationPage() {
             </Button>
           </div>
         ) : user?.organizationId ? (
-          <div className="ml-auto">
-            <Button
-              variant="secondary"
-              icon="download"
-              onClick={() => pdfApi.organization(user.organizationId!).catch(() => toast.error('Couldn’t generate the PDF', 'Please try again.'))}
-            >
-              Download profile PDF
-            </Button>
+          <div className="ml-auto flex gap-2">
+            {EXPORT_FORMATS.map((f) => (
+              <Button
+                key={f.value}
+                variant="secondary"
+                icon="download"
+                onClick={() =>
+                  pdfApi.organization(user.organizationId!, f.value).catch(() => toast.error('Couldn’t generate the document', 'Please try again.'))
+                }
+              >
+                Profile ({f.label})
+              </Button>
+            ))}
           </div>
         ) : undefined
       }
@@ -293,7 +300,7 @@ export default function OrganizationPage() {
             </tr>
           </Thead>
           <tbody>
-            {(orgs || []).map((org) => (
+            {pageSlice(orgs || [], page).map((org) => (
               <Tr key={org._id} onClick={() => navigate(`/organization/${org._id}`)}>
                 <Td className="font-medium text-foreground">
                   <div className="flex items-center gap-2.5">
@@ -313,6 +320,7 @@ export default function OrganizationPage() {
           </tbody>
         </TableShell>
       )}
+      {orgs && <Pagination className="mt-3" page={page} pageSize={PAGE_SIZE} total={orgs.length} onPage={setPage} />}
     </AppLayout>
   );
 }

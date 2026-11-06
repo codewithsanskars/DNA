@@ -1,5 +1,11 @@
 import Button from './Button';
 
+/** Rows per page for every candidate list in the portal. */
+export const PAGE_SIZE = 25;
+
+/** The rows of `items` on `page` (1-based), for lists paginated in the browser. */
+export const pageSlice = <T,>(items: T[], page: number, pageSize = PAGE_SIZE) => items.slice((page - 1) * pageSize, page * pageSize);
+
 /** Page footer for server-paginated lists: "1–25 of 312" plus Prev / Next. */
 export default function Pagination({
   page,

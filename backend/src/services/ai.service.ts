@@ -374,7 +374,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Do not invent constraints the
       },
       { role: 'user', content: query },
     ]);
-    return sanitizeSearch(out);
+    return sanitizeSearch(out, query);
   },
 };
 
@@ -388,7 +388,41 @@ const strList = (v: unknown, n = 50) =>
   Array.isArray(v) ? [...new Set(v.map((x) => String(x).trim()).filter(Boolean))].slice(0, n) : [];
 const ym = (v: unknown) => (typeof v === 'string' && /^\d{4}(-\d{2})?(-\d{2})?$/.test(v.trim()) ? v.trim() : undefined);
 
+/** Total years from merged employment intervals (overlaps counted once). */
+function yearsFromHistory(history: { startDate?: string; endDate?: string; current?: boolean }[]): number | undefined {
+  const now = new Date();
+  const toMonths = (v?: string) => {
+    if (!v) return null;
+    const [y, m] = v.split('-').map(Number);
+    return y * 12 + ((m || 1) - 1);
+  };
+  const spans = history
+    .map((e) => [toMonths(e.startDate), e.current || !e.endDate ? now.getFullYear() * 12 + now.getMonth() : toMonths(e.endDate)] as const)
+    .filter((x): x is readonly [number, number] => x[0] != null && x[1] != null && x[1] >= x[0])
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let cur: [number, number] | null = null;
+  for (const [a, b] of spans) {
+    if (!cur || a > cur[1]) {
+      if (cur) total += cur[1] - cur[0];
+      cur = [a, b];
+    } else cur[1] = Math.max(cur[1], b);
+  }
+  if (cur) total += cur[1] - cur[0];
+  return total ? Math.round((total / 12) * 10) / 10 : undefined;
+}
+
 function sanitizeParsed(o: any) {
+  const out = sanitizeParsedRaw(o);
+  // Small local models are unreliable at date arithmetic: a current role keeps
+  // no end date, and years of experience comes from the dates, not the model.
+  out.employmentHistory = out.employmentHistory.map((e) => (e.current ? { ...e, endDate: undefined } : e));
+  const fromDates = yearsFromHistory(out.employmentHistory);
+  if (fromDates !== undefined) out.yearsExperience = fromDates;
+  return out;
+}
+
+function sanitizeParsedRaw(o: any) {
   const yrs = numOr(o?.yearsExperience);
   return {
     firstName: str(o?.firstName, 100),
@@ -432,21 +466,59 @@ function sanitizeParsed(o: any) {
   };
 }
 
-function sanitizeSearch(o: any) {
-  const filters: Record<string, unknown> = {};
-  const s = (k: string) => {
-    const v = str(o?.[k], 500);
-    if (v) filters[k] = v;
+/**
+ * Models (especially small local ones) add constraints the user never asked
+ * for. Keep a filter only if it's grounded in the query text.
+ */
+function sanitizeSearch(o: any, query: string) {
+  const text = ` ${query.toLowerCase().replace(/[^a-z0-9+#.@ ]/g, ' ').replace(/\s+/g, ' ')} `;
+  const words = (v: string) => v.toLowerCase().split(/[^a-z0-9+#.]+/).filter((w) => w.length > 1);
+  // Every meaningful word of the value appears in the query (so "Austin" can't become a company).
+  const grounded = (v: string) => {
+    const ws = words(v).filter((w) => !['and', 'or', 'not', 'the', 'in', 'at', 'of'].includes(w));
+    return ws.length > 0 && ws.every((w) => text.includes(` ${w} `) || text.includes(` ${w}s `) || text.includes(w));
   };
-  ['q', 'title', 'company', 'location', 'education'].forEach(s);
-  const skills = strList(o?.skills, 20);
+  const numbersInQuery = new Set((query.match(/\d+/g) || []).map(Number));
+  const filters: Record<string, unknown> = {};
+
+  // "PYTHON" -> "Python"; leaves normal casing and short acronyms like "AWS" alone.
+  const tidy = (v: string) => (v.length > 3 && v === v.toUpperCase() ? v.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()) : v);
+  for (const k of ['title', 'company', 'location', 'education']) {
+    const v = str(o?.[k], 200);
+    if (v && grounded(v)) filters[k] = tidy(v);
+  }
+  // A value used for one field shouldn't be reused for another (e.g. location also set as company).
+  if (filters.company && filters.location && String(filters.company).toLowerCase() === String(filters.location).toLowerCase()) delete filters.company;
+  // Keyword query: drop it if it's only operators or repeats the structured filters.
+  const q = str(o?.q, 500);
+  // A plain sentence copied from the input isn't a keyword query: with the
+  // implicit AND it would match almost nothing.
+  const isOperatorQuery = /\b(AND|OR|NOT)\b|"|\(/.test(q || '');
+  if (
+    q &&
+    words(q).some((w) => !['and', 'or', 'not'].includes(w)) &&
+    grounded(q.replace(/\b(AND|OR|NOT)\b|["()]/g, ' ')) &&
+    (isOperatorQuery || words(q).length <= 3) &&
+    !/\b(years?|yrs|least|within|days?)\b/i.test(q)
+  )
+    filters.q = q;
+
+  // The skills filter requires every skill, so skills inside an OR query must
+  // stay out of it ("java OR kotlin" must not become "java AND kotlin").
+  const orTerms = /\bOR\b/.test(String(filters.q || '')) ? new Set(words(String(filters.q))) : new Set<string>();
+  const skills = strList(o?.skills, 20)
+    .filter(grounded)
+    .filter((sk) => !words(sk).some((w) => orTerms.has(w)))
+    .map(tidy);
   if (skills.length) filters.skills = skills;
   for (const k of ['minExperience', 'maxExperience', 'maxNoticePeriod']) {
     const n = numOr(o?.[k]);
-    if (n !== undefined && n >= 0) filters[k] = n;
+    if (n !== undefined && n >= 0 && numbersInQuery.has(n)) filters[k] = n;
   }
+  // "5+ years" means a minimum, never also a maximum.
+  if (filters.minExperience != null && filters.maxExperience === filters.minExperience && /\+|more|at least|over|min/i.test(query)) delete filters.maxExperience;
   const by = ym(o?.availableBy);
-  if (by) filters.availableBy = by;
+  if (by && /\b(available|by|before|from|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|20\d\d)/i.test(query)) filters.availableBy = by;
   const wa = strList(o?.workAuthorization).filter((w) => (WORK_AUTHORIZATIONS as readonly string[]).includes(w));
   if (wa.length) filters.workAuthorization = wa;
   return { filters, explanation: str(o?.explanation, 500) || '' };

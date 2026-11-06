@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { pdfApi } from '../api/pdf.api';
+import { EXPORT_FORMATS, ExportFormat, pdfApi } from '../api/pdf.api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '../components/layout/AppLayout';
 import Card from '../components/shared/Card';
@@ -170,28 +170,35 @@ function ContactModal({ orgId, contact, onClose }: { orgId: string; contact?: Or
   );
 }
 
+/** Branded profile export, PDF or Word (same SWFS letterhead template). */
 function OrgPdfButton({ orgId }: { orgId: string }) {
   const toast = useToast();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<ExportFormat | null>(null);
   return (
-    <Button
-      variant="secondary"
-      size="sm"
-      icon="download"
-      loading={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await pdfApi.organization(orgId);
-        } catch {
-          toast.error('Couldn’t generate the PDF', 'Please try again.');
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      PDF
-    </Button>
+    <>
+      {EXPORT_FORMATS.map((f) => (
+        <Button
+          key={f.value}
+          variant="secondary"
+          size="sm"
+          icon="download"
+          loading={busy === f.value}
+          disabled={busy !== null}
+          onClick={async () => {
+            setBusy(f.value);
+            try {
+              await pdfApi.organization(orgId, f.value);
+            } catch {
+              toast.error('Couldn’t generate the document', 'Please try again.');
+            } finally {
+              setBusy(null);
+            }
+          }}
+        >
+          {f.label}
+        </Button>
+      ))}
+    </>
   );
 }
 
